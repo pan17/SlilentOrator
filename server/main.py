@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,7 +30,15 @@ logger = logging.getLogger(__name__)
 ppt_controller: Optional[PPTController] = None
 tts_engine: Optional[TTSEngine] = None
 script_parser: Optional[ScriptParser] = None
+current_project: Optional[str] = None  # 当前加载的演讲稿项目名
 _main_loop: Optional[asyncio.AbstractEventLoop] = None  # 主线程event loop，供后台线程调用
+
+# 预生成状态
+pregen_running = False
+pregen_total = 0
+pregen_done = 0
+pregen_failed = 0
+pregen_skipped = 0
 
 # WebSocket连接管理器
 class ConnectionManager:
@@ -75,14 +83,54 @@ def on_tts_state_change(state: TTSState):
     if _main_loop is not None:
         asyncio.run_coroutine_threadsafe(broadcast_status(), _main_loop)
 
+
+async def start_pre_generation():
+    """后台预生成所有页面的音频"""
+    global pregen_running, pregen_total, pregen_done, pregen_failed, pregen_skipped
+    if not script_parser or not tts_engine or not script_parser.pages:
+        logger.warning("无法预生成：演讲稿或TTS引擎未就绪")
+        return
+
+    async def on_progress(total, done, failed, skipped, page_num):
+        global pregen_total, pregen_done, pregen_failed, pregen_skipped
+        pregen_total = total
+        pregen_done = done
+        pregen_failed = failed
+        pregen_skipped = skipped
+        await broadcast_status()
+
+    pregen_running = True
+    pregen_total = len(script_parser.pages)
+    pregen_done = 0
+    pregen_failed = 0
+    pregen_skipped = 0
+    await broadcast_status()
+
+    try:
+        result = await tts_engine.pre_generate_all(script_parser.pages, progress_callback=on_progress)
+        logger.info(f"预生成完成: {result}")
+    except Exception as e:
+        logger.error(f"预生成异常: {e}")
+    finally:
+        pregen_running = False
+        await broadcast_status()
+
 def get_full_status() -> dict:
     """获取完整状态"""
     status = {
+        "project": current_project,
         "ppt": ppt_controller.get_status() if ppt_controller else {"error": "未初始化"},
         "tts": tts_engine.get_status() if tts_engine else {"error": "未初始化"},
         "script": {
             "total_pages": script_parser.get_total_pages() if script_parser else 0,
             "loaded": script_parser is not None
+        },
+        "pre_generation": {
+            "running": pregen_running,
+            "total": pregen_total,
+            "done": pregen_done,
+            "failed": pregen_failed,
+            "skipped": pregen_skipped
         }
     }
     return status
@@ -116,14 +164,24 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"TTS引擎初始化失败: {e}")
     
-    # 初始化演讲稿解析器（尝试加载默认文件）
-    try:
-        default_script = settings.scripts_dir / "demo.md"
-        if default_script.exists():
-            script_parser = ScriptParser.from_file(default_script)
-            logger.info(f"演讲稿加载成功: {default_script}, 共 {script_parser.get_total_pages()} 页")
-    except Exception as e:
-        logger.warning(f"默认演讲稿加载失败: {e}")
+    # 尝试加载 pptresource 下的第一个项目（如果有）
+    if settings.ppt_resource_dir.exists():
+        projects = sorted([d for d in settings.ppt_resource_dir.iterdir() if d.is_dir() and not d.name.startswith('.')])
+        if projects:
+            first_project = projects[0]
+            ppt_files = list(first_project.glob("*.pptx")) + list(first_project.glob("*.ppt"))
+            script_path = first_project / "script.md"
+            if ppt_files and script_path.exists():
+                try:
+                    ppt_controller.open_presentation(str(ppt_files[0]))
+                    script_parser = ScriptParser.from_file(script_path)
+                    tts_cache_dir = first_project / "tts_cache"
+                    if tts_engine:
+                        tts_engine.set_cache_dir(tts_cache_dir)
+                    current_project = first_project.name
+                    logger.info(f"已自动加载项目: {first_project.name}, 共 {script_parser.get_total_pages()} 页")
+                except Exception as e:
+                    logger.warning(f"自动加载项目失败: {e}")
     
     logger.info("服务初始化完成")
     yield
@@ -229,11 +287,83 @@ async def ppt_stop():
     
     return {"success": success}
 
+# ==================== 演讲项目管理接口 ====================
+
+@app.get("/api/projects")
+async def list_projects():
+    """列出 pptresource 下所有演讲项目文件夹"""
+    projects = []
+    if settings.ppt_resource_dir.exists():
+        for folder in sorted(settings.ppt_resource_dir.iterdir()):
+            if folder.is_dir() and not folder.name.startswith('.'):
+                # 检查是否包含脚本和PPT
+                ppt_files = list(folder.glob("*.pptx")) + list(folder.glob("*.ppt"))
+                has_ppt = len(ppt_files) > 0
+                has_script = (folder / "script.md").exists()
+                projects.append({
+                    "name": folder.name,
+                    "has_ppt": has_ppt,
+                    "has_script": has_script,
+                    "ppt_file": ppt_files[0].name if ppt_files else None
+                })
+    return {"projects": projects, "current": current_project}
+
+
+@app.post("/api/projects/load")
+async def load_project(name: str = Query(..., description="演讲稿项目名")):
+    """加载指定演讲项目：打开PPT + 加载演讲稿"""
+    global script_parser, current_project
+
+    project_dir = settings.ppt_resource_dir / name
+    if not project_dir.exists() or not project_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"项目不存在: {name}")
+
+    # 查找PPT文件
+    ppt_files = list(project_dir.glob("*.pptx")) + list(project_dir.glob("*.ppt"))
+    if not ppt_files:
+        raise HTTPException(status_code=404, detail=f"项目中未找到PPT文件: {name}")
+
+    # 打开PPT
+    if not ppt_controller:
+        raise HTTPException(status_code=503, detail="PPT控制器未初始化")
+    ppt_path = str(ppt_files[0])
+    if not ppt_controller.open_presentation(ppt_path):
+        raise HTTPException(status_code=500, detail=f"PPT文件打开失败: {ppt_files[0].name}")
+
+    # 启动放映
+    ppt_controller.start_slideshow()
+
+    # 加载演讲稿
+    script_path = project_dir / "script.md"
+    if script_path.exists():
+        try:
+            script_parser = ScriptParser.from_file(script_path)
+            logger.info(f"演讲稿加载成功: {script_path}, 共 {script_parser.get_total_pages()} 页")
+        except Exception as e:
+            logger.warning(f"演讲稿加载失败: {e}")
+            script_parser = None
+
+    # 切换TTS缓存目录到项目目录
+    tts_cache_dir = project_dir / "tts_cache"
+    if tts_engine:
+        tts_engine.set_cache_dir(tts_cache_dir)
+
+    current_project = name
+    await broadcast_status()
+
+    return {
+        "success": True,
+        "project": name,
+        "ppt": ppt_files[0].name,
+        "script_loaded": script_parser is not None
+    }
+
+
 # ==================== TTS控制接口 ====================
 
 @app.post("/api/tts/play")
 async def tts_play(page: Optional[int] = None):
-    """播放指定页或当前页的演讲稿"""
+    """播放指定页或当前页的演讲稿（使用按页缓存，无缓存则生成后播放）"""
     if not tts_engine:
         raise HTTPException(status_code=503, detail="TTS引擎未初始化")
     if not script_parser:
@@ -250,10 +380,51 @@ async def tts_play(page: Optional[int] = None):
     if not text:
         raise HTTPException(status_code=404, detail=f"第{page}页演讲稿不存在")
     
-    success = await tts_engine.play(text)
+    success = await tts_engine.play_page(page, text)
     await broadcast_status()
     
     return {"success": success, "page": page}
+
+
+@app.get("/api/tts/cache")
+async def get_tts_cache_status():
+    """获取所有页面的音频缓存状态"""
+    if not tts_engine:
+        raise HTTPException(status_code=503, detail="TTS引擎未初始化")
+    if not script_parser:
+        raise HTTPException(status_code=503, detail="演讲稿未加载")
+
+    return tts_engine.get_cache_status(script_parser.get_total_pages())
+
+
+@app.post("/api/tts/pre_generate")
+async def pre_generate_audio():
+    """后台预生成所有页面的音频（已有且有效的跳过）"""
+    if not tts_engine:
+        raise HTTPException(status_code=503, detail="TTS引擎未初始化")
+    if not script_parser:
+        raise HTTPException(status_code=503, detail="演讲稿未加载")
+    if pregen_running:
+        raise HTTPException(status_code=400, detail="正在预生成中，请等待完成")
+
+    # 后台启动预生成
+    asyncio.create_task(start_pre_generation())
+    return {"success": True, "message": "后台预生成已启动"}
+
+
+@app.post("/api/tts/delete_cache")
+async def delete_tts_cache(page: Optional[int] = None):
+    """删除指定页或全部音频缓存"""
+    if not tts_engine:
+        raise HTTPException(status_code=503, detail="TTS引擎未初始化")
+
+    if page is not None:
+        success = tts_engine.delete_page_cache(page)
+        return {"success": success, "page": page}
+    else:
+        success = tts_engine.delete_all_cache()
+        await broadcast_status()
+        return {"success": success, "message": "全部缓存已删除"}
 
 @app.post("/api/tts/pause")
 async def tts_pause():
@@ -289,26 +460,6 @@ async def tts_stop():
     return {"success": success}
 
 # ==================== 演讲稿接口 ====================
-
-@app.post("/api/script/load")
-async def load_script(file_name: str):
-    """加载演讲稿文件"""
-    global script_parser
-    
-    file_path = settings.scripts_dir / file_name
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail=f"文件不存在: {file_name}")
-    
-    try:
-        script_parser = ScriptParser.from_file(file_path)
-        await broadcast_status()
-        return {
-            "success": True,
-            "total_pages": script_parser.get_total_pages(),
-            "file": file_name
-        }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"加载失败: {str(e)}")
 
 @app.get("/api/script/pages")
 async def get_script_pages():
@@ -369,7 +520,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     if page:
                         text = script_parser.get_page(page)
                         if text:
-                            await tts_engine.play(text)
+                            await tts_engine.play_page(page, text)
             elif action == "pause":
                 if tts_engine:
                     tts_engine.pause()
@@ -389,5 +540,16 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 if __name__ == "__main__":
+    import socket
+    try:
+        # 获取局域网IP用于提示
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        lan_ip = s.getsockname()[0]
+        s.close()
+        print(f" 手机/局域网: http://{lan_ip}:{settings.port}")
+    except Exception:
+        pass
+
     import uvicorn
     uvicorn.run(app, host=settings.host, port=settings.port)
