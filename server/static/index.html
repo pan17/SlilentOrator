@@ -35,6 +35,77 @@
             padding-bottom: 100px;
         }
         
+        /* 项目选择器 */
+        .project-selector {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 16px;
+        }
+        
+        .project-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .project-row select {
+            flex: 1;
+            padding: 10px 12px;
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            font-size: 15px;
+            background: var(--card);
+            color: var(--text);
+            outline: none;
+            cursor: pointer;
+            -webkit-appearance: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%2364748b' d='M6 8L0 0h12z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 32px;
+        }
+        
+        .project-row select:focus {
+            border-color: var(--primary);
+        }
+        
+        .project-row select:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-load {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            background: var(--primary);
+            color: white;
+            white-space: nowrap;
+        }
+        
+        .btn-load:active { transform: scale(0.96); }
+        .btn-load:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        .current-project {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 8px;
+            padding: 6px 10px;
+            background: #f0fdf4;
+            border-radius: 6px;
+        }
+        
+        .current-project strong {
+            color: var(--success);
+        }
+        
         /* 连接状态栏 */
         .status-bar {
             display: flex;
@@ -189,6 +260,99 @@
         
         .tts-status.error { background: #fef2f2; color: var(--danger); }
         
+        /* 音频缓存管理 */
+        .cache-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+        }
+        
+        .cache-actions .btn {
+            flex: 1;
+            padding: 12px;
+            font-size: 14px;
+        }
+        
+        .cache-progress {
+            margin-top: 10px;
+            padding: 10px 12px;
+            background: #f0f9ff;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #0369a1;
+            display: none;
+        }
+        
+        .cache-progress.active {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .cache-progress .bar {
+            flex: 1;
+            height: 6px;
+            background: #bae6fd;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        
+        .cache-progress .bar .fill {
+            height: 100%;
+            background: #0284c7;
+            border-radius: 3px;
+            transition: width 0.3s;
+            width: 0%;
+        }
+        
+        .cache-progress .label {
+            white-space: nowrap;
+            font-weight: 500;
+        }
+        
+        .btn-cache {
+            background: #0891b2;
+            color: white;
+        }
+        
+        .btn-cache:hover { background: #0e7490; }
+        
+        .btn-cache-del {
+            background: #f1f5f9;
+            color: #dc2626;
+        }
+        
+        .btn-cache-del:hover { background: #fee2e2; }
+        
+        /* 音频缓存标记 */
+        .page-dot.cached::after {
+            content: '';
+            width: 6px;
+            height: 6px;
+            background: var(--success);
+            border-radius: 50%;
+            position: absolute;
+            top: 2px;
+            right: 2px;
+        }
+        
+        .page-dot.cached-invalid::after {
+            content: '!';
+            width: 14px;
+            height: 14px;
+            background: #f59e0b;
+            border-radius: 50%;
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            font-size: 10px;
+            font-weight: 700;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
         /* 演讲稿预览 */
         .script-preview {
             background: var(--card);
@@ -313,6 +477,18 @@
         <div class="connection-url" id="serverUrl">正在获取...</div>
     </div>
     
+    <!-- 演讲项目选择 -->
+    <div class="project-selector">
+        <div class="section-title">演讲稿项目</div>
+        <div class="project-row">
+            <select id="projectSelect" disabled>
+                <option value="">— 加载中 —</option>
+            </select>
+            <button class="btn-load" id="btnLoadProject" onclick="loadSelectedProject()" disabled>加载</button>
+        </div>
+        <div class="current-project" id="currentProjectInfo">未加载项目</div>
+    </div>
+    
     <!-- 幻灯片信息 -->
     <div class="slide-info">
         <div>
@@ -342,6 +518,14 @@
         </div>
         <div class="tts-status idle" id="ttsStatus">
             <span id="ttsStateText">待机中</span>
+        </div>
+        <div class="cache-actions">
+            <button class="btn btn-cache" id="btnPreGen" onclick="startPreGen()">📦 预生成音频</button>
+            <button class="btn btn-cache-del" id="btnDelCache" onclick="deleteAllCache()">🗑 删除缓存</button>
+        </div>
+        <div class="cache-progress" id="cacheProgress">
+            <span class="label" id="cacheProgressLabel">生成中... 0/0</span>
+            <div class="bar"><div class="fill" id="cacheProgressFill"></div></div>
         </div>
     </div>
     
@@ -427,6 +611,11 @@
         
         // 更新UI状态
         function updateStatusUI(data) {
+            // 项目信息
+            if (data.project) {
+                updateCurrentProject(data.project);
+            }
+            
             // PPT状态
             currentSlide = data.ppt.current_slide || 0;
             totalSlides = data.ppt.total_slides || 0;
@@ -436,9 +625,17 @@
             // 加载页面列表
             loadPageList(data.script.total_pages || 0);
             
-            // TTS状态
+            // TTS状态（检测生成完成，刷新缓存标记）
+            const prevTtsState = ttsState;
             ttsState = data.tts.state || 'idle';
             updateTTSUI();
+            if (prevTtsState === 'generating' && ttsState !== 'generating') {
+                fetchCacheStatus();
+            }
+            
+            // 预生成状态
+            const pg = data.pre_generation || {};
+            updatePreGenUI(pg);
             
             // 更新演讲稿
             if (currentSlide && data.script.total_pages) {
@@ -485,9 +682,12 @@
                     const dot = document.createElement('div');
                     dot.className = 'page-dot' + (i === currentSlide ? ' active' : '');
                     dot.textContent = i;
+                    dot.dataset.page = i;
                     dot.onclick = () => gotoSlide(i);
                     list.appendChild(dot);
                 }
+                // 页面列表重建后重新获取缓存状态
+                fetchCacheStatus();
             } else {
                 // 只更新active状态
                 list.querySelectorAll('.page-dot').forEach((dot, i) => {
@@ -564,8 +764,9 @@
         }
         
         function pptNextAndPlay() {
+            const nextPage = currentSlide + 1;
             wsSend('next');
-            setTimeout(() => wsSend('play', { page: currentSlide + 1 || undefined }), 300);
+            setTimeout(() => wsSend('play', { page: nextPage }), 300);
         }
         
         // 页面切换时自动获取演讲稿
@@ -577,9 +778,199 @@
             }
         }, 500);
         
+        // ==================== 演讲项目管理 ====================
+        
+        let projects = [];
+        
+        // 获取项目列表
+        async function fetchProjects() {
+            const select = document.getElementById('projectSelect');
+            const btn = document.getElementById('btnLoadProject');
+            try {
+                const resp = await fetch(`${httpBase}/api/projects`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    projects = data.projects || [];
+                    select.innerHTML = '';
+                    if (projects.length === 0) {
+                        select.innerHTML = '<option value="">— 暂无项目 —</option>';
+                        select.disabled = true;
+                        btn.disabled = true;
+                    } else {
+                        // 当前项目排在首位
+                        const sorted = [...projects].sort((a, b) => {
+                            if (a.name === data.current) return -1;
+                            if (b.name === data.current) return 1;
+                            return a.name.localeCompare(b.name);
+                        });
+                        sorted.forEach(p => {
+                            const opt = document.createElement('option');
+                            opt.value = p.name;
+                            const badges = [];
+                            if (p.has_ppt) badges.push('PPT');
+                            if (p.has_script) badges.push('稿');
+                            opt.textContent = p.name + (badges.length ? ' [' + badges.join('+') + ']' : '');
+                            if (p.name === data.current) opt.selected = true;
+                            select.appendChild(opt);
+                        });
+                        select.disabled = false;
+                        btn.disabled = false;
+                    }
+                    updateCurrentProject(data.current);
+                }
+            } catch (e) {
+                select.innerHTML = '<option value="">— 获取失败 —</option>';
+                select.disabled = true;
+                btn.disabled = true;
+            }
+        }
+        
+        // 更新当前项目显示
+        function updateCurrentProject(name) {
+            const el = document.getElementById('currentProjectInfo');
+            if (name) {
+                el.innerHTML = '当前项目：<strong>' + name + '</strong>';
+            } else {
+                el.innerHTML = '未加载项目';
+            }
+        }
+        
+        // 加载选中的项目
+        async function loadSelectedProject() {
+            const select = document.getElementById('projectSelect');
+            const btn = document.getElementById('btnLoadProject');
+            const name = select.value;
+            if (!name) return;
+            
+            btn.disabled = true;
+            btn.textContent = '加载中...';
+            showToast('正在加载项目: ' + name);
+            
+            try {
+                const resp = await fetch(`${httpBase}/api/projects/load?name=${encodeURIComponent(name)}`, { method: 'POST' });
+                const data = await resp.json();
+                if (data.success) {
+                    showToast('项目加载成功: ' + name);
+                    updateCurrentProject(name);
+                    // 状态将由WebSocket推送更新
+                } else {
+                    showToast('加载失败');
+                }
+            } catch (e) {
+                showToast('请求失败');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '加载';
+            }
+        }
+        
+        // ==================== 音频缓存管理 ====================
+        
+        let cacheStatus = {};
+        let pendingCacheRefresh = false;  // 标记预生成/播放后需要刷新缓存状态
+        
+        // 更新预生成进度UI
+        function updatePreGenUI(pg) {
+            const el = document.getElementById('cacheProgress');
+            const label = document.getElementById('cacheProgressLabel');
+            const fill = document.getElementById('cacheProgressFill');
+            const btn = document.getElementById('btnPreGen');
+            
+            if (pg.running) {
+                el.classList.add('active');
+                const done = (pg.done || 0) + (pg.skipped || 0);
+                const total = pg.total || 0;
+                label.textContent = `预生成中... ${done}/${total}`;
+                fill.style.width = total > 0 ? ((done / total) * 100) + '%' : '0%';
+                btn.disabled = true;
+                btn.textContent = '⏳ 生成中...';
+                pendingCacheRefresh = true;
+            } else {
+                el.classList.remove('active');
+                fill.style.width = '0%';
+                btn.disabled = false;
+                btn.textContent = '📦 预生成音频';
+                // 预生成运行结束 → 拉取缓存状态更新小绿点
+                if (pendingCacheRefresh) {
+                    pendingCacheRefresh = false;
+                    fetchCacheStatus();
+                }
+            }
+        }
+        
+        // 获取缓存状态
+        async function fetchCacheStatus() {
+            try {
+                const resp = await fetch(`${httpBase}/api/tts/cache`);
+                if (resp.ok) {
+                    cacheStatus = await resp.json();
+                    updatePageCacheBadges();
+                }
+            } catch (e) {
+                // 忽略
+            }
+        }
+        
+        // 更新页面小圆点的缓存标记
+        function updatePageCacheBadges() {
+            const pages = cacheStatus.pages || {};
+            document.querySelectorAll('.page-dot').forEach(dot => {
+                const page = dot.dataset.page;
+                const info = pages[page];
+                dot.classList.remove('cached', 'cached-invalid');
+                if (info) {
+                    if (info.exists && info.valid) {
+                        dot.classList.add('cached');
+                    } else if (info.exists && !info.valid) {
+                        dot.classList.add('cached-invalid');
+                    }
+                }
+            });
+        }
+        
+        // 启动预生成
+        async function startPreGen() {
+            const btn = document.getElementById('btnPreGen');
+            btn.disabled = true;
+            btn.textContent = '⏳ 启动中...';
+            try {
+                const resp = await fetch(`${httpBase}/api/tts/pre_generate`, { method: 'POST' });
+                const data = await resp.json();
+                if (data.success) {
+                    showToast('预生成已启动');
+                } else {
+                    showToast(data.detail || '启动失败');
+                }
+            } catch (e) {
+                showToast('请求失败');
+                btn.disabled = false;
+                btn.textContent = '📦 预生成音频';
+            }
+        }
+        
+        // 删除全部缓存
+        async function deleteAllCache() {
+            if (!confirm('确定删除所有页面的音频缓存？')) return;
+            try {
+                const resp = await fetch(`${httpBase}/api/tts/delete_cache`, { method: 'POST' });
+                const data = await resp.json();
+                if (data.success) {
+                    showToast('缓存已删除');
+                    cacheStatus = {};
+                    // 清除页面标记
+                    document.querySelectorAll('.page-dot').forEach(dot => {
+                        dot.classList.remove('cached', 'cached-invalid');
+                    });
+                }
+            } catch (e) {
+                showToast('请求失败');
+            }
+        }
+        
         // 启动
         connectWs();
         fetchStatus();
+        fetchProjects();
     </script>
 </body>
 </html>
