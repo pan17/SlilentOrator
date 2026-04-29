@@ -45,60 +45,75 @@ class PPTController:
             logger.error(f"获取活动演示文稿失败: {e}")
             return False
     
+    def _in_slideshow(self) -> bool:
+        """检查是否处于放映模式"""
+        try:
+            return self.app.SlideShowWindows.Count > 0
+        except:
+            return False
+
+    def _get_view(self):
+        """获取当前视图（自动适配放映/编辑模式）"""
+        if self._in_slideshow():
+            return self.app.SlideShowWindows(1).View
+        return self.app.ActiveWindow.View
+
     def next_slide(self) -> bool:
         """下一页"""
         try:
             if not self._ensure_presentation():
                 return False
-            
+
             current = self.get_current_slide()
             total = self.get_total_slides()
-            
+
             if current < total:
-                self.app.ActiveWindow.View.GotoSlide(current + 1)
+                self._get_view().GotoSlide(current + 1)
                 return True
             return False
         except Exception as e:
             logger.error(f"下一页失败: {e}")
             return False
-    
+
     def prev_slide(self) -> bool:
         """上一页"""
         try:
             if not self._ensure_presentation():
                 return False
-            
+
             current = self.get_current_slide()
-            
+
             if current > 1:
-                self.app.ActiveWindow.View.GotoSlide(current - 1)
+                self._get_view().GotoSlide(current - 1)
                 return True
             return False
         except Exception as e:
             logger.error(f"上一页失败: {e}")
             return False
-    
+
     def goto_slide(self, slide_num: int) -> bool:
         """跳转到指定页"""
         try:
             if not self._ensure_presentation():
                 return False
-            
+
             total = self.get_total_slides()
-            
+
             if 1 <= slide_num <= total:
-                self.app.ActiveWindow.View.GotoSlide(slide_num)
+                self._get_view().GotoSlide(slide_num)
                 return True
             return False
         except Exception as e:
             logger.error(f"跳页失败: {e}")
             return False
-    
+
     def get_current_slide(self) -> int:
         """获取当前页码"""
         try:
             if not self._ensure_presentation():
                 return 0
+            if self._in_slideshow():
+                return self.app.SlideShowWindows(1).View.CurrentShowPosition
             return self.app.ActiveWindow.View.Slide.SlideIndex
         except Exception as e:
             logger.error(f"获取当前页码失败: {e}")

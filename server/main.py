@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 ppt_controller: Optional[PPTController] = None
 tts_engine: Optional[TTSEngine] = None
 script_parser: Optional[ScriptParser] = None
+_main_loop: Optional[asyncio.AbstractEventLoop] = None  # 主线程event loop，供后台线程调用
 
 # WebSocket连接管理器
 class ConnectionManager:
@@ -69,8 +70,10 @@ async def broadcast_status():
     })
 
 def on_tts_state_change(state: TTSState):
-    """TTS状态变更回调"""
-    asyncio.create_task(broadcast_status())
+    """TTS状态变更回调（可能从后台线程触发）"""
+    global _main_loop
+    if _main_loop is not None:
+        asyncio.run_coroutine_threadsafe(broadcast_status(), _main_loop)
 
 def get_full_status() -> dict:
     """获取完整状态"""
@@ -87,8 +90,11 @@ def get_full_status() -> dict:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global ppt_controller, tts_engine, script_parser
-    
+    global ppt_controller, tts_engine, script_parser, _main_loop
+
+    # 保存主线程event loop引用，供TTS回调跨线程调用
+    _main_loop = asyncio.get_running_loop()
+
     logger.info("正在初始化服务...")
     
     # 初始化PPT控制器

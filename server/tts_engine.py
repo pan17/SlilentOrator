@@ -6,6 +6,8 @@ import tempfile
 import os
 import logging
 import hashlib
+import threading
+import time
 from pathlib import Path
 from typing import Optional, Callable
 from enum import Enum
@@ -28,7 +30,7 @@ class TTSState(Enum):
 
 class TTSEngine:
     """基于edge-tts的TTS引擎，支持播放/暂停/继续/停止"""
-    
+
     def __init__(self, voice: str = "zh-CN-XiaoxiaoNeural", rate: str = "+0%", volume: str = "+0%"):
         self.voice = voice
         self.rate = rate
@@ -39,7 +41,9 @@ class TTSEngine:
         self._temp_dir = Path(tempfile.gettempdir()) / "silent_orator_tts"
         self._temp_dir.mkdir(exist_ok=True)
         self._on_state_change: Optional[Callable] = None
-        
+        self._playback_monitor_running = False
+        self._playback_monitor_thread: Optional[threading.Thread] = None
+
         # 初始化VLC
         if VLC_AVAILABLE:
             self._vlc_instance = vlc.Instance("--quiet")
@@ -51,7 +55,7 @@ class TTSEngine:
     def set_on_state_change(self, callback: Callable[[TTSState], None]) -> None:
         """设置状态变更回调"""
         self._on_state_change = callback
-    
+
     def _set_state(self, state: TTSState) -> None:
         """设置状态并触发回调"""
         self.state = state
@@ -60,6 +64,34 @@ class TTSEngine:
                 self._on_state_change(state)
             except Exception as e:
                 logger.error(f"状态回调错误: {e}")
+
+    def _start_playback_monitor(self) -> None:
+        """启动播放结束监控线程"""
+        self._stop_playback_monitor()
+        self._playback_monitor_running = True
+
+        def monitor():
+            while self._playback_monitor_running:
+                time.sleep(0.5)
+                if not self._playback_monitor_running:
+                    break
+                if self._player and self.state == TTSState.PLAYING:
+                    # is_playing() == 0 means playback finished
+                    if self._player.is_playing() == 0:
+                        logger.info("播放结束检测到，自动切换为idle")
+                        self._playback_monitor_running = False
+                        self._set_state(TTSState.IDLE)
+                        break
+
+        self._playback_monitor_thread = threading.Thread(target=monitor, daemon=True)
+        self._playback_monitor_thread.start()
+
+    def _stop_playback_monitor(self) -> None:
+        """停止播放结束监控线程"""
+        self._playback_monitor_running = False
+        if self._playback_monitor_thread and self._playback_monitor_thread.is_alive():
+            self._playback_monitor_thread.join(timeout=1)
+        self._playback_monitor_thread = None
     
     async def generate_audio(self, text: str) -> str:
         """生成音频文件，返回文件路径"""
@@ -113,6 +145,7 @@ class TTSEngine:
             self._player.set_media(media)
             self._player.play()
             self._set_state(TTSState.PLAYING)
+            self._start_playback_monitor()
             
             logger.info(f"开始播放: {text[:50]}...")
             return True
@@ -126,42 +159,45 @@ class TTSEngine:
         """暂停播放"""
         if not self._player:
             return False
-        
+
         try:
             if self.state == TTSState.PLAYING:
                 self._player.pause()
                 self._set_state(TTSState.PAUSED)
+                self._stop_playback_monitor()
                 logger.info("播放已暂停")
                 return True
             return False
         except Exception as e:
             logger.error(f"暂停失败: {e}")
             return False
-    
+
     def resume(self) -> bool:
         """继续播放"""
         if not self._player:
             return False
-        
+
         try:
             if self.state == TTSState.PAUSED:
                 self._player.pause()  # VLC中pause是切换状态
                 self._set_state(TTSState.PLAYING)
+                self._start_playback_monitor()
                 logger.info("播放已继续")
                 return True
             return False
         except Exception as e:
             logger.error(f"继续播放失败: {e}")
             return False
-    
+
     def stop(self) -> bool:
         """停止播放"""
         if not self._player:
             return False
-        
+
         try:
             self._player.stop()
             self._set_state(TTSState.STOPPED)
+            self._stop_playback_monitor()
             logger.info("播放已停止")
             return True
         except Exception as e:
