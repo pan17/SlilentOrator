@@ -1,0 +1,160 @@
+import win32com.client
+from typing import Optional, Tuple
+import pythoncom
+import logging
+
+logger = logging.getLogger(__name__)
+
+class PPTController:
+    """基于pywin32的PowerPoint COM接口控制器"""
+    
+    def __init__(self):
+        self.app: Optional[win32com.client.Dispatch] = None
+        self.presentation = None
+        self._init_com()
+    
+    def _init_com(self) -> None:
+        """初始化COM接口"""
+        try:
+            pythoncom.CoInitialize()
+            self.app = win32com.client.Dispatch("PowerPoint.Application")
+            self.app.Visible = True
+            logger.info("PowerPoint COM接口初始化成功")
+        except Exception as e:
+            logger.error(f"PowerPoint COM接口初始化失败: {e}")
+            raise RuntimeError(f"无法连接到PowerPoint，请确保已安装PowerPoint: {e}")
+    
+    def open_presentation(self, file_path: str) -> bool:
+        """打开指定PPT文件"""
+        try:
+            self.presentation = self.app.Presentations.Open(file_path)
+            logger.info(f"打开PPT文件: {file_path}")
+            return True
+        except Exception as e:
+            logger.error(f"打开PPT文件失败: {e}")
+            return False
+    
+    def get_active_presentation(self) -> bool:
+        """获取当前活动的演示文稿"""
+        try:
+            if self.app.Presentations.Count > 0:
+                self.presentation = self.app.ActivePresentation
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"获取活动演示文稿失败: {e}")
+            return False
+    
+    def next_slide(self) -> bool:
+        """下一页"""
+        try:
+            if not self._ensure_presentation():
+                return False
+            
+            current = self.get_current_slide()
+            total = self.get_total_slides()
+            
+            if current < total:
+                self.app.ActiveWindow.View.GotoSlide(current + 1)
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"下一页失败: {e}")
+            return False
+    
+    def prev_slide(self) -> bool:
+        """上一页"""
+        try:
+            if not self._ensure_presentation():
+                return False
+            
+            current = self.get_current_slide()
+            
+            if current > 1:
+                self.app.ActiveWindow.View.GotoSlide(current - 1)
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"上一页失败: {e}")
+            return False
+    
+    def goto_slide(self, slide_num: int) -> bool:
+        """跳转到指定页"""
+        try:
+            if not self._ensure_presentation():
+                return False
+            
+            total = self.get_total_slides()
+            
+            if 1 <= slide_num <= total:
+                self.app.ActiveWindow.View.GotoSlide(slide_num)
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"跳页失败: {e}")
+            return False
+    
+    def get_current_slide(self) -> int:
+        """获取当前页码"""
+        try:
+            if not self._ensure_presentation():
+                return 0
+            return self.app.ActiveWindow.View.Slide.SlideIndex
+        except Exception as e:
+            logger.error(f"获取当前页码失败: {e}")
+            return 0
+    
+    def get_total_slides(self) -> int:
+        """获取总页数"""
+        try:
+            if not self._ensure_presentation():
+                return 0
+            return self.presentation.Slides.Count
+        except Exception as e:
+            logger.error(f"获取总页数失败: {e}")
+            return 0
+    
+    def get_status(self) -> dict:
+        """获取PPT状态"""
+        return {
+            "current_slide": self.get_current_slide(),
+            "total_slides": self.get_total_slides(),
+            "has_presentation": self.presentation is not None
+        }
+    
+    def _ensure_presentation(self) -> bool:
+        """确保有活动的演示文稿"""
+        if self.presentation is None:
+            return self.get_active_presentation()
+        return True
+    
+    def start_slideshow(self) -> bool:
+        """开始放映（从当前页）"""
+        try:
+            if not self._ensure_presentation():
+                return False
+            self.presentation.SlideShowSettings.Run()
+            return True
+        except Exception as e:
+            logger.error(f"开始放映失败: {e}")
+            return False
+    
+    def stop_slideshow(self) -> bool:
+        """结束放映"""
+        try:
+            if self.app.SlideShowWindows.Count > 0:
+                self.app.SlideShowWindows(1).View.Exit()
+            return True
+        except Exception as e:
+            logger.error(f"结束放映失败: {e}")
+            return False
+    
+    def quit(self) -> None:
+        """退出PowerPoint应用"""
+        try:
+            if self.app:
+                self.app.Quit()
+        except:
+            pass
+        finally:
+            pythoncom.CoUninitialize()

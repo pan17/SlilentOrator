@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+venv/
+.venv/
+
+# Temp files
+*.tmp
+*.log
+temp_audio/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Confidential files
+.env
+*.pem
+*.key

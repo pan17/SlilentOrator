@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>SlilentOrator 控制台</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --danger: #dc2626;
+            --success: #16a34a;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+            --text-secondary: #64748b;
+            --border: #e2e8f0;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 16px;
+            padding-bottom: 100px;
+        }
+        
+        /* 连接状态栏 */
+        .status-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: var(--card);
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 16px;
+        }
+        
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #94a3b8;
+            transition: background 0.3s;
+        }
+        
+        .status-dot.connected { background: var(--success); }
+        .status-dot.disconnected { background: var(--danger); }
+        
+        .connection-url {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        
+        /* 幻灯片信息 */
+        .slide-info {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 16px;
+        }
+        
+        .slide-number {
+            font-size: 48px;
+            font-weight: 700;
+            color: var(--primary);
+        }
+        
+        .slide-total {
+            font-size: 18px;
+            color: var(--text-secondary);
+        }
+        
+        /* 控制按钮组 */
+        .control-section {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 16px;
+        }
+        
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .btn-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+        
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 16px;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            touch-action: manipulation;
+        }
+        
+        .btn:active {
+            transform: scale(0.96);
+        }
+        
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .btn-primary:hover { background: var(--primary-dark); }
+        
+        .btn-secondary {
+            background: #f1f5f9;
+            color: var(--text);
+        }
+        
+        .btn-secondary:hover { background: #e2e8f0; }
+        
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+        
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+        
+        .btn-large {
+            padding: 20px;
+            font-size: 18px;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        /* TTS状态 */
+        .tts-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 12px;
+            background: #f0fdf4;
+            border-radius: 8px;
+            color: var(--success);
+            font-weight: 500;
+            margin-top: 12px;
+        }
+        
+        .tts-status.playing { background: #fef9c3; color: #a16207; }
+        
+        .tts-status.paused { background: #fef9c3; color: #a16207; }
+        
+        .tts-status.idle { background: #f0fdf4; color: var(--success); }
+        
+        .tts-status.error { background: #fef2f2; color: var(--danger); }
+        
+        /* 演讲稿预览 */
+        .script-preview {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 16px;
+        }
+        
+        .script-text {
+            font-size: 15px;
+            line-height: 1.6;
+            color: var(--text);
+            max-height: 150px;
+            overflow-y: auto;
+            padding: 12px;
+            background: #f8fafc;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        
+        /* 页面列表 */
+        .page-list {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding: 4px 0;
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        .page-list::-webkit-scrollbar { display: none; }
+        
+        .page-dot {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #e2e8f0;
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        
+        .page-dot.active {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .page-dot.has-script::after {
+            content: '';
+            width: 6px;
+            height: 6px;
+            background: var(--success);
+            border-radius: 50%;
+            position: absolute;
+            top: 2px;
+            right: 2px;
+        }
+        
+        .page-dot {
+            position: relative;
+        }
+        
+        /* 快捷操作 */
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+        
+        /* Toast通知 */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: rgba(30, 41, 59, 0.9);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 24px;
+            font-size: 14px;
+            font-weight: 500;
+            opacity: 0;
+            transition: all 0.3s;
+            z-index: 1000;
+        }
+        
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+        
+        /* 加载指示器 */
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid currentColor;
+            border-right-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <!-- 连接状态 -->
+    <div class="status-bar">
+        <div class="status-indicator">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="statusText">未连接</span>
+        </div>
+        <div class="connection-url" id="serverUrl">正在获取...</div>
+    </div>
+    
+    <!-- 幻灯片信息 -->
+    <div class="slide-info">
+        <div>
+            <span class="slide-number" id="currentSlide">-</span>
+            <span class="slide-total" id="totalSlides">/ -</span>
+        </div>
+    </div>
+    
+    <!-- PPT控制 -->
+    <div class="control-section">
+        <div class="section-title">PPT 控制</div>
+        <div class="btn-row">
+            <button class="btn btn-secondary" id="btnPrev" onclick="pptPrev()">◀ 上一页</button>
+            <button class="btn btn-primary" id="btnNext" onclick="pptNext()">下一页 ▶</button>
+            <button class="btn btn-secondary" id="btnStart" onclick="pptStart()">放映</button>
+        </div>
+        <div class="page-list" id="pageList"></div>
+    </div>
+    
+    <!-- TTS控制 -->
+    <div class="control-section">
+        <div class="section-title">语音播放 (TTS)</div>
+        <div class="btn-row">
+            <button class="btn btn-success btn-large" id="btnPlay" onclick="ttsPlay()">▶ 播放</button>
+            <button class="btn btn-secondary btn-large" id="btnPause" onclick="ttsPause()" disabled>⏸ 暂停</button>
+            <button class="btn btn-danger btn-large" id="btnStop" onclick="ttsStop()" disabled>■ 停止</button>
+        </div>
+        <div class="tts-status idle" id="ttsStatus">
+            <span id="ttsStateText">待机中</span>
+        </div>
+    </div>
+    
+    <!-- 演讲稿预览 -->
+    <div class="script-preview">
+        <div class="section-title">当前页演讲稿</div>
+        <div class="script-text" id="scriptText">暂无演讲稿</div>
+    </div>
+    
+    <!-- 快捷操作 -->
+    <div class="control-section">
+        <div class="section-title">快捷操作</div>
+        <div class="quick-actions">
+            <button class="btn btn-secondary" onclick="playAndSpeak()">▶ 播放本页</button>
+            <button class="btn btn-secondary" onclick="pptNextAndPlay()">下一页+播放</button>
+        </div>
+    </div>
+    
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+    
+    <script>
+        // 状态
+        let ws = null;
+        let reconnectTimer = null;
+        let currentSlide = 0;
+        let totalSlides = 0;
+        let ttsState = 'idle';
+        let scriptPages = {};
+        
+        // 获取当前服务器地址
+        const wsBase = `ws://${location.host}`;
+        const httpBase = `http://${location.host}`;
+        
+        document.getElementById('serverUrl').textContent = location.host;
+        
+        // Toast提示
+        function showToast(msg, duration = 2000) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), duration);
+        }
+        
+        // 连接WebSocket
+        function connectWs() {
+            ws = new WebSocket(`${wsBase}/ws`);
+            
+            ws.onopen = () => {
+                updateStatus(true);
+                showToast('已连接');
+            };
+            
+            ws.onclose = () => {
+                updateStatus(false);
+                reconnectTimer = setTimeout(connectWs, 3000);
+            };
+            
+            ws.onerror = () => {
+                updateStatus(false);
+            };
+            
+            ws.onmessage = (e) => {
+                const msg = JSON.parse(e.data);
+                if (msg.type === 'status_update') {
+                    updateStatusUI(msg.data);
+                }
+            };
+        }
+        
+        // 更新连接状态
+        function updateStatus(connected) {
+            const dot = document.getElementById('statusDot');
+            const text = document.getElementById('statusText');
+            if (connected) {
+                dot.className = 'status-dot connected';
+                text.textContent = '已连接';
+            } else {
+                dot.className = 'status-dot disconnected';
+                text.textContent = '未连接';
+            }
+        }
+        
+        // 更新UI状态
+        function updateStatusUI(data) {
+            // PPT状态
+            currentSlide = data.ppt.current_slide || 0;
+            totalSlides = data.ppt.total_slides || 0;
+            document.getElementById('currentSlide').textContent = currentSlide || '-';
+            document.getElementById('totalSlides').textContent = '/ ' + (totalSlides || '-');
+            
+            // 加载页面列表
+            loadPageList(data.script.total_pages || 0);
+            
+            // TTS状态
+            ttsState = data.tts.state || 'idle';
+            updateTTSUI();
+            
+            // 更新演讲稿
+            if (currentSlide && data.script.total_pages) {
+                fetchScriptPage(currentSlide);
+            }
+        }
+        
+        // 更新TTS按钮状态
+        function updateTTSUI() {
+            const btnPlay = document.getElementById('btnPlay');
+            const btnPause = document.getElementById('btnPause');
+            const btnStop = document.getElementById('btnStop');
+            const ttsStatusEl = document.getElementById('ttsStatus');
+            const ttsStateText = document.getElementById('ttsStateText');
+            
+            btnPlay.disabled = false;
+            btnPause.disabled = ttsState !== 'playing';
+            btnStop.disabled = ttsState === 'idle';
+            
+            ttsStatusEl.className = 'tts-status ' + ttsState;
+            
+            const stateMap = {
+                'idle': '待机中',
+                'playing': '播放中...',
+                'paused': '已暂停',
+                'stopped': '已停止',
+                'generating': '生成中...'
+            };
+            ttsStateText.textContent = stateMap[ttsState] || ttsState;
+        }
+        
+        // 加载页面列表
+        function loadPageList(total) {
+            const list = document.getElementById('pageList');
+            if (!total) {
+                list.innerHTML = '';
+                return;
+            }
+            
+            // 只在变化时更新
+            if (list.children.length !== total) {
+                list.innerHTML = '';
+                for (let i = 1; i <= total; i++) {
+                    const dot = document.createElement('div');
+                    dot.className = 'page-dot' + (i === currentSlide ? ' active' : '');
+                    dot.textContent = i;
+                    dot.onclick = () => gotoSlide(i);
+                    list.appendChild(dot);
+                }
+            } else {
+                // 只更新active状态
+                list.querySelectorAll('.page-dot').forEach((dot, i) => {
+                    dot.classList.toggle('active', i + 1 === currentSlide);
+                });
+            }
+        }
+        
+        // 获取演讲稿页面
+        async function fetchScriptPage(page) {
+            try {
+                const resp = await fetch(`${httpBase}/api/script/page/${page}`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    document.getElementById('scriptText').textContent = data.text || '暂无内容';
+                }
+            } catch (e) {
+                document.getElementById('scriptText').textContent = '加载失败';
+            }
+        }
+        
+        // 发送WebSocket消息
+        function wsSend(action, data = {}) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action, ...data }));
+            }
+        }
+        
+        // API请求
+        async function apiPost(path) {
+            try {
+                const resp = await fetch(`${httpBase}${path}`, { method: 'POST' });
+                return await resp.json();
+            } catch (e) {
+                showToast('请求失败');
+                return null;
+            }
+        }
+        
+        // 初始化获取状态
+        async function fetchStatus() {
+            try {
+                const resp = await fetch(`${httpBase}/api/status`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    updateStatusUI(data);
+                }
+            } catch (e) {
+                console.error('获取状态失败', e);
+            }
+        }
+        
+        // PPT控制
+        function pptPrev() { wsSend('prev'); }
+        function pptNext() { wsSend('next'); }
+        
+        async function pptStart() {
+            const resp = await apiPost('/api/ppt/start');
+            if (resp && resp.success) showToast('放映开始');
+        }
+        
+        async function gotoSlide(n) {
+            wsSend('goto', { page: n });
+        }
+        
+        // TTS控制
+        function ttsPlay() { wsSend('play', { page: currentSlide || undefined }); }
+        function ttsPause() { wsSend('pause'); }
+        function ttsStop() { wsSend('stop'); }
+        
+        // 快捷操作
+        async function playAndSpeak() {
+            wsSend('play', { page: currentSlide || undefined });
+        }
+        
+        function pptNextAndPlay() {
+            wsSend('next');
+            setTimeout(() => wsSend('play', { page: currentSlide + 1 || undefined }), 300);
+        }
+        
+        // 页面切换时自动获取演讲稿
+        let lastSlide = 0;
+        setInterval(() => {
+            if (currentSlide !== lastSlide) {
+                lastSlide = currentSlide;
+                if (currentSlide) fetchScriptPage(currentSlide);
+            }
+        }, 500);
+        
+        // 启动
+        connectWs();
+        fetchStatus();
+    </script>
+</body>
+</html>
