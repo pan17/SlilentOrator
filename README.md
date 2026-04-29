@@ -14,8 +14,10 @@ SlilentOrator/
 │   ├── config.py        # 配置文件
 │   ├── requirements.txt # Python依赖
 │   └── static/          # 网页遥控端（移动端优先）
-├── scripts/             # 演讲稿目录
-│   └── demo.md          # 示例演讲稿
+├── pptresource/         # 演讲项目目录
+│   └── sample/          # 示例项目
+│       ├── script.md    # 演讲稿
+│       └── tts_cache/   # 音频缓存（自动生成）
 ├── start.bat            # Windows一键启动脚本
 └── README.md
 ```
@@ -43,9 +45,15 @@ python server/main.py
 - API地址：`http://localhost:8000`
 - API文档：`http://localhost:8000/docs`
 
-### 3. 演讲稿格式
+### 3. 演讲稿项目管理
 
-在 `scripts/` 目录下创建 `.md` 文件，格式如下：
+在 `pptresource/` 下创建子文件夹作为演讲项目，每个项目包含：
+
+- `script.md` — 演讲稿（格式见下）
+- `*.pptx` — 对应的PPT文件（放入即可，网页端自动识别）
+- `tts_cache/` — 音频缓存（网页端点击"预生成音频"自动创建）
+
+演讲稿格式（`script.md`）：
 
 ```markdown
 第一页：
@@ -63,6 +71,10 @@ python server/main.py
 ### 状态查询
 - `GET /api/status` - 获取完整状态（PPT页码、TTS状态、演讲稿信息）
 
+### 演讲项目管理
+- `GET /api/projects` - 列出所有演讲项目
+- `POST /api/projects/load?name=xxx` - 加载指定项目（打开PPT+加载演讲稿）
+
 ### PPT控制
 - `POST /api/ppt/next` - 下一页
 - `POST /api/ppt/prev` - 上一页
@@ -71,13 +83,16 @@ python server/main.py
 - `POST /api/ppt/stop` - 结束放映
 
 ### TTS控制
-- `POST /api/tts/play?page=1` - 播放指定页演讲稿
+- `POST /api/tts/play?page=1` - 播放指定页演讲稿（优先使用缓存）
 - `POST /api/tts/pause` - 暂停播放
 - `POST /api/tts/resume` - 继续播放
 - `POST /api/tts/stop` - 停止播放
+- `GET /api/tts/cache` - 获取每页音频缓存状态
+- `POST /api/tts/pre_generate` - 后台预生成所有页面音频（已有跳过）
+- `POST /api/tts/delete_cache` - 删除全部缓存；`?page=3` 删除指定页
 
 ### 演讲稿管理
-- `POST /api/script/load?file_name=demo.md` - 加载演讲稿
+- `POST /api/script/load?file_name=demo.md` - 加载演讲稿（旧版接口）
 - `GET /api/script/pages` - 获取所有页面内容
 - `GET /api/script/page/{page}` - 获取指定页内容
 

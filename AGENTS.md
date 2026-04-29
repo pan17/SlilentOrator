@@ -1,8 +1,9 @@
-**四项基本原则**
+**基本原则**
 1. 行动前思考 — 不要假设，分析问题相关的所有内容，明确说明假设
 2. 简洁优先 — 用最少的步骤解决问题
 3. 精准修改 — 只碰必须碰的，只清理自己造成的混乱
 4. 目标驱动执行 — 定义成功标准，循环验证直到达成
+5. 文档同步 — 每次修改代码或结构后，检查 AGENTS.md 和 README.md 是否需要同步更新，确保文档反映真实项目状态
 
 ---
 
@@ -20,7 +21,10 @@ server/
   config.py         # pydantic-settings 配置
   static/index.html # 移动端优先的网页遥控界面
   requirements.txt
-scripts/demo.md    # 示例演讲稿
+pptresource/         # 演讲项目目录（每个子文件夹一个项目）
+  sample/
+    script.md       # 演讲稿
+    tts_cache/      # 按页缓存 page_001.mp3...
 start.bat          # Windows 一键启动（含 venv 创建）
 venv/              # 由 start.bat 自动创建的虚拟环境
 ```
@@ -82,11 +86,19 @@ pip uninstall aiodns pycares -y
 **WebSocket**（`/ws`）：
 - 连接后立即推送当前状态 `{type: "status_update", data: {...}}`
 - 客户端发送 `{action: "next"|"prev"|"goto"|"play"|"pause"|"resume"|"stop", page?: number}`
-- 服务端在 PPT 操作、TTS 状态变化时主动广播
+- 服务端在 PPT 操作、TTS 状态变化、预生成进度变化时主动广播
+
+**演讲稿项目管理**（`pptresource/`）：
+- 每个子文件夹为一个演讲项目，文件夹名即项目名
+- 项目结构：`项目名/script.md`（演讲稿）+ `项目名/*.pptx`（PPT）+ `项目名/tts_cache/`（音频缓存）
+- 网页控制台可列出所有项目、选择加载，自动找PPT并打开 + 加载演讲稿
 
 **TTS 音频缓存**（`server/tts_engine.py`）：
-- 文本 MD5 前12位命名缓存文件，重复播放直接复用
-- 缓存在 `temp/silent_orator_tts/` 目录
+- 按页缓存：文件名 `page_001.mp3`，一页对应一个缓存文件
+- 缓存在各项目目录下的 `tts_cache/`，按项目隔离
+- 支持检查缓存有效性（文件大小 + MP3 文件头校验）
+- 网页端可显式触发「预生成音频」，逐页生成，已有且有效的跳过
+- 播放时优先使用缓存，纯本地播放零延迟；无缓存时回退到即时生成
 
 ---
 
