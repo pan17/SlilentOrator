@@ -12,16 +12,8 @@ SlilentOrator/
 │   ├── tts_engine.py    # TTS引擎（edge-tts）
 │   ├── script_parser.py # 演讲稿解析器
 │   ├── config.py        # 配置文件
-│   └── requirements.txt # Python依赖
-├── android/             # 安卓客户端
-│   ├── app/src/main/java/com/silentorator/
-│   │   ├── MainActivity.kt
-│   │   ├── model/
-│   │   ├── network/
-│   │   ├── ui/
-│   │   └── viewmodel/
-│   ├── build.gradle.kts
-│   └── README.md
+│   ├── requirements.txt # Python依赖
+│   └── static/          # 网页遥控端（移动端优先）
 ├── scripts/             # 演讲稿目录
 │   └── demo.md          # 示例演讲稿
 ├── start.bat            # Windows一键启动脚本
@@ -100,26 +92,8 @@ WebSocket消息格式：
 }
 ```
 
-## 安卓端
-
-### 运行方式
-
-1. 用 Android Studio 打开 `android/` 文件夹
-2. 连接真机或启动模拟器
-3. 点击运行
-
-详细说明见 [android/README.md](android/README.md)
-
-### 使用步骤
-
-1. 启动Windows服务端（`python server/main.py`）
-2. 确保手机和电脑在同一WiFi
-3. 在App中输入电脑IP（如 `http://192.168.1.5:8000`）
-4. 开始控制PPT翻页和TTS播放
-
 ## 后续计划
 
-- [x] 安卓端App开发
 - [ ] 语音克隆替换edge-tts
 - [ ] PPT备注页自动读取演讲稿
 - [ ] 激光笔功能
