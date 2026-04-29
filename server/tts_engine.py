@@ -9,7 +9,7 @@ import hashlib
 import threading
 import time
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional, Callable, Coroutine
 from enum import Enum
 
 try:
@@ -31,15 +31,15 @@ class TTSState(Enum):
 class TTSEngine:
     """基于edge-tts的TTS引擎，支持播放/暂停/继续/停止"""
 
-    def __init__(self, voice: str = "zh-CN-XiaoxiaoNeural", rate: str = "+0%", volume: str = "+0%"):
+    def __init__(self, voice: str = "zh-CN-XiaoxiaoNeural", rate: str = "+0%", volume: str = "+0%", cache_dir: Optional[Path] = None):
         self.voice = voice
         self.rate = rate
         self.volume = volume
         self.state = TTSState.IDLE
         self.current_text: Optional[str] = None
         self.current_audio_file: Optional[str] = None
-        self._temp_dir = Path(tempfile.gettempdir()) / "silent_orator_tts"
-        self._temp_dir.mkdir(exist_ok=True)
+        self._cache_dir = cache_dir or (Path(tempfile.gettempdir()) / "silent_orator_tts")
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._on_state_change: Optional[Callable] = None
         self._playback_monitor_running = False
         self._playback_monitor_thread: Optional[threading.Thread] = None
@@ -51,10 +51,188 @@ class TTSEngine:
         else:
             self._vlc_instance = None
             self._player = None
+
+    def set_cache_dir(self, cache_dir: Path) -> None:
+        """设置音频缓存目录，用于按项目隔离缓存"""
+        self._cache_dir = cache_dir
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"TTS缓存目录已切换: {cache_dir}")
     
     def set_on_state_change(self, callback: Callable[[TTSState], None]) -> None:
         """设置状态变更回调"""
         self._on_state_change = callback
+
+    # ==================== 页面缓存管理 ====================
+
+    def _page_path(self, page_num: int) -> Path:
+        """按页码返回缓存音频路径"""
+        return self._cache_dir / f"page_{page_num:03d}.mp3"
+
+    @staticmethod
+    def _is_mp3_valid(file_path: Path) -> bool:
+        """检查MP3文件是否完整有效（大小 & 文件头）"""
+        if not file_path.exists():
+            return False
+        size = file_path.stat().st_size
+        if size < 1024:
+            return False
+        # 检查MP3文件头
+        try:
+            with open(file_path, 'rb') as f:
+                header = f.read(3)
+                # ID3 tag 或以 0xFF 开头的MPEG帧同步
+                return header in (b'ID3',) or (header[0] == 0xFF and (header[1] & 0xE0) == 0xE0)
+        except Exception:
+            return size > 10240  # 无法读取头时，大于10KB也算有效
+
+    async def pre_generate_page(self, page_num: int, text: str) -> bool:
+        """预生成单页音频（不触发状态变更），返回是否成功"""
+        output_path = self._page_path(page_num)
+        if output_path.exists() and self._is_mp3_valid(output_path):
+            return True  # 已存在且有效
+
+        try:
+            connector = aiohttp.TCPConnector(resolver=None, family=socket.AF_INET)
+            communicate = edge_tts.Communicate(
+                text, self.voice,
+                rate=self.rate, volume=self.volume,
+                connector=connector
+            )
+            await communicate.save(str(output_path))
+            logger.info(f"预生成第{page_num}页音频完成")
+            return True
+        except Exception as e:
+            logger.error(f"预生成第{page_num}页音频失败: {e}")
+            return False
+
+    async def pre_generate_all(self, pages: dict[int, str], progress_callback=None) -> dict:
+        """预生成所有页面的音频，已生成且有效的跳过。
+        progress_callback: async callable(total, done, failed, skipped, page_num)
+        返回: {total, done, failed, skipped}
+        """
+        total = len(pages)
+        done = failed = skipped = 0
+        for page_num in sorted(pages.keys()):
+            text = pages[page_num]
+            if not text or not text.strip():
+                skipped += 1
+                if progress_callback:
+                    await progress_callback(total, done, failed, skipped, page_num)
+                continue
+
+            cache_path = self._page_path(page_num)
+            if cache_path.exists() and self._is_mp3_valid(cache_path):
+                skipped += 1
+                if progress_callback:
+                    await progress_callback(total, done, failed, skipped, page_num)
+                continue
+
+            if await self.pre_generate_page(page_num, text):
+                done += 1
+            else:
+                failed += 1
+
+            if progress_callback:
+                await progress_callback(total, done, failed, skipped, page_num)
+
+        logger.info(f"预生成结束: 总计{total}, 新增{done}, 失败{failed}, 跳过{skipped}")
+        return {"total": total, "done": done, "failed": failed, "skipped": skipped}
+
+    async def play_page(self, page_num: int, text: str) -> bool:
+        """按页播放：优先使用缓存音频，无缓存则生成后播放"""
+        if not VLC_AVAILABLE:
+            logger.error("VLC不可用，无法播放")
+            return False
+
+        try:
+            if self.state in (TTSState.PLAYING, TTSState.PAUSED):
+                self.stop()
+
+            self.current_text = text
+            output_path = self._page_path(page_num)
+
+            # 无缓存 → 生成
+            if not output_path.exists() or not self._is_mp3_valid(output_path):
+                self._set_state(TTSState.GENERATING)
+                try:
+                    connector = aiohttp.TCPConnector(resolver=None, family=socket.AF_INET)
+                    communicate = edge_tts.Communicate(
+                        text, self.voice,
+                        rate=self.rate, volume=self.volume,
+                        connector=connector
+                    )
+                    await communicate.save(str(output_path))
+                except Exception as e:
+                    logger.error(f"第{page_num}页音频生成失败: {e}")
+                    self._set_state(TTSState.IDLE)
+                    return False
+
+            # 播放缓存
+            self.current_audio_file = str(output_path)
+            media = self._vlc_instance.media_new(str(output_path))
+            self._player.set_media(media)
+            self._player.play()
+            self._set_state(TTSState.PLAYING)
+            self._start_playback_monitor()
+            logger.info(f"开始播放第{page_num}页: {text[:50]}...")
+            return True
+
+        except Exception as e:
+            logger.error(f"播放第{page_num}页失败: {e}")
+            self._set_state(TTSState.IDLE)
+            return False
+
+    def get_cache_status(self, total_pages: int) -> dict:
+        """获取所有页面的音频缓存状态"""
+        pages = {}
+        cached_count = 0
+        valid_count = 0
+        for p in range(1, total_pages + 1):
+            path = self._page_path(p)
+            exists = path.exists()
+            valid = self._is_mp3_valid(path) if exists else False
+            pages[str(p)] = {
+                "exists": exists,
+                "valid": valid,
+                "size": path.stat().st_size if exists else 0
+            }
+            if exists:
+                cached_count += 1
+                if valid:
+                    valid_count += 1
+        return {
+            "pages": pages,
+            "total": total_pages,
+            "cached": cached_count,
+            "valid": valid_count
+        }
+
+    def delete_page_cache(self, page_num: int) -> bool:
+        """删除指定页的缓存音频"""
+        path = self._page_path(page_num)
+        if path.exists():
+            try:
+                path.unlink()
+                logger.info(f"删除第{page_num}页缓存: {path}")
+                return True
+            except Exception as e:
+                logger.error(f"删除第{page_num}页缓存失败: {e}")
+                return False
+        return True
+
+    def delete_all_cache(self) -> bool:
+        """删除当前项目所有缓存音频"""
+        try:
+            deleted = 0
+            if self._cache_dir.exists():
+                for f in self._cache_dir.glob("page_*.mp3"):
+                    f.unlink()
+                    deleted += 1
+            logger.info(f"已删除{deleted}个缓存文件")
+            return True
+        except Exception as e:
+            logger.error(f"删除全部缓存失败: {e}")
+            return False
 
     def _set_state(self, state: TTSState) -> None:
         """设置状态并触发回调"""
@@ -99,7 +277,7 @@ class TTSEngine:
         
         # 生成唯一文件名
         text_hash = hashlib.md5(text.encode()).hexdigest()[:12]
-        output_file = str(self._temp_dir / f"tts_{text_hash}.mp3")
+        output_file = str(self._cache_dir / f"tts_{text_hash}.mp3")
         
         # 如果文件已存在，直接复用
         if os.path.exists(output_file):
@@ -236,17 +414,9 @@ class TTSEngine:
         }
     
     def cleanup(self) -> None:
-        """清理临时文件"""
+        """停止播放器（保留缓存音频文件）"""
         try:
             if self._player:
                 self._player.stop()
-            
-            # 清理临时音频文件
-            if self._temp_dir.exists():
-                for f in self._temp_dir.glob("*.mp3"):
-                    try:
-                        f.unlink()
-                    except:
-                        pass
         except Exception as e:
             logger.error(f"清理失败: {e}")

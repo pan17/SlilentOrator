@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     port: int = 8000
     
     # Paths
-    scripts_dir: Path = Path(__file__).parent.parent / "scripts"
+    ppt_resource_dir: Path = Path(__file__).parent.parent / "pptresource"
     temp_audio_dir: Path = Path(__file__).parent / "temp_audio"
     
     # TTS config

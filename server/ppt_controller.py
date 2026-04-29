@@ -1,3 +1,4 @@
+import time
 import win32com.client
 from typing import Optional, Tuple
 import pythoncom
@@ -58,6 +59,17 @@ class PPTController:
             return self.app.SlideShowWindows(1).View
         return self.app.ActiveWindow.View
 
+    def _wait_slide_settle(self, target_slide: int, timeout: float = 0.3) -> None:
+        """等待PPT切换到目标页码后 COM 状态稳定（补偿 COM 异步延迟）"""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                if self.get_current_slide() == target_slide:
+                    return
+            except Exception:
+                pass
+            time.sleep(0.02)
+
     def next_slide(self) -> bool:
         """下一页"""
         try:
@@ -68,7 +80,9 @@ class PPTController:
             total = self.get_total_slides()
 
             if current < total:
-                self._get_view().GotoSlide(current + 1)
+                target = current + 1
+                self._get_view().GotoSlide(target)
+                self._wait_slide_settle(target)
                 return True
             return False
         except Exception as e:
@@ -84,7 +98,9 @@ class PPTController:
             current = self.get_current_slide()
 
             if current > 1:
-                self._get_view().GotoSlide(current - 1)
+                target = current - 1
+                self._get_view().GotoSlide(target)
+                self._wait_slide_settle(target)
                 return True
             return False
         except Exception as e:
@@ -101,6 +117,7 @@ class PPTController:
 
             if 1 <= slide_num <= total:
                 self._get_view().GotoSlide(slide_num)
+                self._wait_slide_settle(slide_num)
                 return True
             return False
         except Exception as e:
