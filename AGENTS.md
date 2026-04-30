@@ -9,14 +9,14 @@
 
 ## 项目概览
 
-Windows 后台服务 + 浏览器遥控端。核心功能：PPT 翻页控制 + edge-tts 语音播放。
+Windows 后台服务 + 浏览器遥控端。核心功能：PPT 翻页控制 + 双 TTS 引擎（edge-tts / Omnivoice 语音克隆）。
 
 **真实目录结构（不是README里的）：**
 ```
 server/
   main.py           # FastAPI 入口，启动 uvicorn
   ppt_controller.py # pywin32 COM 控制 PowerPoint
-  tts_engine.py     # edge-tts 生成音频 + VLC 播放
+  tts_engine.py     # TTS 引擎（edge-tts + Omnivoice 语音克隆）
   script_parser.py  # 解析 md 演讲稿（支持中文数字页码）
   config.py         # pydantic-settings 配置
   static/index.html # 移动端优先的网页遥控界面
@@ -36,6 +36,7 @@ venv/              # 由 start.bat 自动创建的虚拟环境
 - Windows 10/11 + PowerPoint 已安装
 - Python（通过 start.bat 自动创建 venv，无需手动安装依赖）
 - VLC Media Player（[下载地址](https://www.videolan.org/vlc/)，TTS 音频播放依赖）
+- Omnivoice 引擎需额外安装：`pip install gradio-client` 并运行本地部署的 Omnivoice 服务
 
 ---
 
@@ -93,10 +94,22 @@ pip uninstall aiodns pycares -y
 - 项目结构：`项目名/script.md`（演讲稿）+ `项目名/*.pptx`（PPT）+ `项目名/tts_cache/`（音频缓存）
 - 网页控制台可列出所有项目、选择加载，自动找PPT并打开 + 加载演讲稿
 
-**TTS 音频缓存**（`server/tts_engine.py`）：
+**TTS 引擎**（`server/tts_engine.py`）：
+- 双引擎架构：`TTSEngine`（edge-tts）+ `OmnivoiceEngine`（本地语音克隆）
+- 网页端可运行时热切换引擎（`GET/POST /api/tts/engine`）
+- 切换引擎时自动保留缓存目录
+
+**Omnivoice 引擎**（`OmnivoiceEngine`）：
+- 通过 `gradio_client` 调用本地部署的 Omnivoice API（默认 http://localhost:8001）
+- 参数包括：`ref_aud`（参考音频路径）、`ref_text`、`lang`、`instruct`、`ns`、`gs`、`sp` 等
+- `du` 固定传 0，由 Omnivoice 根据 speed 自动计算时长
+- 参考音频路径会自动清洗不可见 Unicode 控制字符
+- 输出 WAV 格式，自动识别为有效缓存（文件头检测支持 MP3 + WAV）
+
+**TTS 音频缓存**：
 - 按页缓存：文件名 `page_001.mp3`，一页对应一个缓存文件
 - 缓存在各项目目录下的 `tts_cache/`，按项目隔离
-- 支持检查缓存有效性（文件大小 + MP3 文件头校验）
+- 支持检查缓存有效性（文件大小 + 文件头校验：MP3 ID3/0xFF、WAV RIFF）
 - 网页端可显式触发「预生成音频」，逐页生成，已有且有效的跳过
 - 播放时优先使用缓存，纯本地播放零延迟；无缓存时回退到即时生成
 

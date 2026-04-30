@@ -465,6 +465,76 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+
+        /* TTS引擎设置 */
+        .setting-row {
+            margin-bottom: 14px;
+        }
+
+        .setting-row label {
+            display: block;
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            font-weight: 500;
+        }
+
+        .setting-row input,
+        .setting-row select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            font-size: 14px;
+            background: var(--card);
+            color: var(--text);
+            outline: none;
+            box-sizing: border-box;
+        }
+
+        .setting-row input:focus,
+        .setting-row select:focus {
+            border-color: var(--primary);
+        }
+
+        .setting-status {
+            margin-top: 8px;
+            font-size: 13px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .setting-status.success {
+            display: block;
+            background: #f0fdf4;
+            color: var(--success);
+        }
+
+        .setting-status.error {
+            display: block;
+            background: #fef2f2;
+            color: var(--danger);
+        }
+
+        .engine-config-box {
+            margin-top: 12px;
+            padding: 12px;
+            background: #f8fafc;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+        }
+
+        .engine-badge {
+            display: inline-block;
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 600;
+            margin-left: 6px;
+        }
+        .engine-badge.edge-tts { background: #dbeafe; color: #1d4ed8; }
+        .engine-badge.omnivoice { background: #fce7f3; color: #be185d; }
     </style>
 </head>
 <body>
@@ -544,6 +614,76 @@
         </div>
     </div>
     
+    <!-- TTS引擎设置 -->
+    <div class="control-section" id="engineSettings">
+        <div class="section-title">TTS引擎设置 <span id="engineBadge" class="engine-badge">edge-tts</span></div>
+
+        <div class="setting-row">
+            <label>引擎类型</label>
+            <select id="engineSelect" onchange="toggleEngineConfig()">
+                <option value="edge-tts">edge-tts（微软云端）</option>
+                <option value="omnivoice">Omnivoice（本地语音克隆）</option>
+            </select>
+        </div>
+
+        <!-- edge-tts 参数 -->
+        <div id="edgeTtsConfig" class="engine-config-box">
+            <div class="setting-row">
+                <label>语音</label>
+                <input type="text" id="ttsVoice" placeholder="zh-CN-XiaoxiaoNeural">
+            </div>
+            <div class="setting-row">
+                <label>语速</label>
+                <input type="text" id="ttsRate" placeholder="+0%">
+            </div>
+            <div class="setting-row">
+                <label>音量</label>
+                <input type="text" id="ttsVolume" placeholder="+0%">
+            </div>
+        </div>
+
+        <!-- Omnivoice 参数 -->
+        <div id="omnivoiceConfig" class="engine-config-box" style="display:none">
+            <div class="setting-row">
+                <label>服务地址</label>
+                <input type="text" id="ovUrl" placeholder="http://localhost:8001">
+            </div>
+            <div class="setting-row">
+                <label>参考音频路径（必需）</label>
+                <input type="text" id="ovRefAud" placeholder="C:/path/to/voice_sample.wav">
+            </div>
+            <div class="setting-row">
+                <label>参考音频文本（可选）</label>
+                <input type="text" id="ovRefText" placeholder="参考音频中说的内容">
+            </div>
+            <div class="setting-row">
+                <label>合成语言</label>
+                <input type="text" id="ovLang" placeholder="Auto">
+            </div>
+            <div class="setting-row">
+                <label>合成指令（可选）</label>
+                <input type="text" id="ovInstruct" placeholder="留空则使用合成文本">
+            </div>
+            <div class="setting-row" style="display:flex;gap:12px">
+                <div style="flex:1">
+                    <label>推理步数</label>
+                    <input type="number" id="ovNs" value="32">
+                </div>
+                <div style="flex:1">
+                    <label>CFG引导</label>
+                    <input type="number" id="ovGs" value="2" step="0.5">
+                </div>
+                <div style="flex:1">
+                    <label>语速</label>
+                    <input type="number" id="ovSp" value="1.0" step="0.1" min="0.5" max="1.5">
+                </div>
+            </div>
+        </div>
+
+        <button class="btn btn-primary" id="btnApplyEngine" onclick="applyEngineConfig()" style="width:100%;margin-top:12px">应用设置</button>
+        <div class="setting-status" id="engineStatus"></div>
+    </div>
+
     <!-- Toast -->
     <div class="toast" id="toast"></div>
     
@@ -967,10 +1107,128 @@
             }
         }
         
+        // ==================== TTS引擎设置 ====================
+
+        let engineConfig = {};
+
+        // 切换引擎参数面板
+        function toggleEngineConfig() {
+            const engine = document.getElementById('engineSelect').value;
+            document.getElementById('edgeTtsConfig').style.display = engine === 'edge-tts' ? 'block' : 'none';
+            document.getElementById('omnivoiceConfig').style.display = engine === 'omnivoice' ? 'block' : 'none';
+        }
+
+        // 获取当前引擎配置
+        async function fetchEngineConfig() {
+            try {
+                const resp = await fetch(`${httpBase}/api/tts/engine`);
+                if (resp.ok) {
+                    engineConfig = await resp.json();
+                    const engine = engineConfig.engine || 'edge-tts';
+                    document.getElementById('engineSelect').value = engine;
+
+                    // 更新badge
+                    const badge = document.getElementById('engineBadge');
+                    badge.textContent = engine;
+                    badge.className = 'engine-badge ' + engine;
+
+                    // 填充edge-tts参数
+                    if (engineConfig.voice !== undefined) {
+                        document.getElementById('ttsVoice').value = engineConfig.voice;
+                        document.getElementById('ttsRate').value = engineConfig.rate;
+                        document.getElementById('ttsVolume').value = engineConfig.volume;
+                    }
+
+                    // 填充omnivoice参数
+                    if (engineConfig.omnivoice_url !== undefined) {
+                        document.getElementById('ovUrl').value = engineConfig.omnivoice_url || '';
+                        document.getElementById('ovRefAud').value = engineConfig.omnivoice_ref_audio || '';
+                        document.getElementById('ovRefText').value = engineConfig.omnivoice_ref_text || '';
+                        document.getElementById('ovLang').value = engineConfig.omnivoice_lang || 'Auto';
+                        document.getElementById('ovInstruct').value = engineConfig.omnivoice_instruct || '';
+                        document.getElementById('ovNs').value = engineConfig.omnivoice_ns ?? 32;
+                        document.getElementById('ovGs').value = engineConfig.omnivoice_gs ?? 2.0;
+                        document.getElementById('ovSp').value = engineConfig.omnivoice_sp ?? 1.0;
+                    }
+
+                    toggleEngineConfig();
+                }
+            } catch (e) {
+                console.error('获取引擎配置失败', e);
+            }
+        }
+
+        // 应用引擎设置
+        async function applyEngineConfig() {
+            const btn = document.getElementById('btnApplyEngine');
+            const status = document.getElementById('engineStatus');
+            const engine = document.getElementById('engineSelect').value;
+
+            btn.disabled = true;
+            btn.textContent = '应用中...';
+            status.className = 'setting-status';
+
+            try {
+                const payload = { engine };
+
+                // 去除不可见Unicode控制字符
+                function sanitize(s) { return s.replace(/[\u200B-\u200F\u202A-\u202F\uFEFF]/g, '').trim(); }
+
+                if (engine === 'omnivoice') {
+                    payload.omnivoice_url = sanitize(document.getElementById('ovUrl').value) || 'http://localhost:8001';
+                    payload.omnivoice_ref_audio = sanitize(document.getElementById('ovRefAud').value);
+                    payload.omnivoice_ref_text = sanitize(document.getElementById('ovRefText').value);
+                    payload.omnivoice_lang = sanitize(document.getElementById('ovLang').value) || 'Auto';
+                    payload.omnivoice_instruct = sanitize(document.getElementById('ovInstruct').value);
+                    payload.omnivoice_ns = parseFloat(document.getElementById('ovNs').value) || 32;
+                    payload.omnivoice_gs = parseFloat(document.getElementById('ovGs').value) || 2.0;
+                    payload.omnivoice_sp = parseFloat(document.getElementById('ovSp').value) || 1.0;
+                    // du 由系统自动计算（后端传0）
+                } else {
+                    payload.voice = sanitize(document.getElementById('ttsVoice').value) || 'zh-CN-XiaoxiaoNeural';
+                    payload.rate = sanitize(document.getElementById('ttsRate').value) || '+0%';
+                    payload.volume = sanitize(document.getElementById('ttsVolume').value) || '+0%';
+                }
+
+                const resp = await fetch(`${httpBase}/api/tts/engine`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+
+                const data = await resp.json();
+                if (data.success) {
+                    status.className = 'setting-status success';
+                    status.textContent = '✔ 引擎已切换为 ' + engine;
+
+                    // 更新badge
+                    const badge = document.getElementById('engineBadge');
+                    badge.textContent = engine;
+                    badge.className = 'engine-badge ' + engine;
+
+                    showToast('TTS引擎已切换');
+                } else {
+                    status.className = 'setting-status error';
+                    status.textContent = '✘ 切换失败: ' + (data.error || '未知错误');
+                }
+            } catch (e) {
+                status.className = 'setting-status error';
+                status.textContent = '✘ 请求失败: ' + e.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '应用设置';
+                // 3秒后自动隐藏状态
+                setTimeout(() => {
+                    status.className = 'setting-status';
+                }, 5000);
+            }
+        }
+
         // 启动
         connectWs();
         fetchStatus();
         fetchProjects();
+        fetchEngineConfig();
     </script>
 </body>
 </html>

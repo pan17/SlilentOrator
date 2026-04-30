@@ -9,7 +9,7 @@ SlilentOrator/
 ├── server/              # Windows服务端
 │   ├── main.py          # FastAPI入口
 │   ├── ppt_controller.py # PPT控制模块
-│   ├── tts_engine.py    # TTS引擎（edge-tts）
+│   ├── tts_engine.py    # TTS引擎（edge-tts + Omnivoice语音克隆）
 │   ├── script_parser.py # 演讲稿解析器
 │   ├── config.py        # 配置文件
 │   ├── requirements.txt # Python依赖
@@ -30,6 +30,7 @@ SlilentOrator/
 - Python 3.9+
 - Microsoft PowerPoint（已安装）
 - VLC Media Player（TTS播放依赖，[下载地址](https://www.videolan.org/vlc/)）
+- Omnivoice引擎需额外安装：`pip install gradio-client` 并运行本地部署的 Omnivoice 服务
 
 ### 2. 启动服务
 
@@ -91,6 +92,10 @@ python server/main.py
 - `POST /api/tts/pre_generate` - 后台预生成所有页面音频（已有跳过）
 - `POST /api/tts/delete_cache` - 删除全部缓存；`?page=3` 删除指定页
 
+### TTS引擎管理
+- `GET /api/tts/engine` - 获取当前引擎类型及全部配置参数
+- `POST /api/tts/engine` - 运行时热切换引擎
+
 ### 演讲稿管理
 - `POST /api/script/load?file_name=demo.md` - 加载演讲稿（旧版接口）
 - `GET /api/script/pages` - 获取所有页面内容
@@ -109,7 +114,6 @@ WebSocket消息格式：
 
 ## 后续计划
 
-- [ ] 语音克隆替换edge-tts
 - [ ] PPT备注页自动读取演讲稿
 - [ ] 激光笔功能
 - [ ] 演讲计时器

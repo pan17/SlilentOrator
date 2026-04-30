@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import settings
 from ppt_controller import PPTController
-from tts_engine import TTSEngine, TTSState
+from tts_engine import TTSEngine, OmnivoiceEngine, TTSState
 from script_parser import ScriptParser
 
 # 配置日志
@@ -28,10 +28,11 @@ logger = logging.getLogger(__name__)
 
 # 全局实例
 ppt_controller: Optional[PPTController] = None
-tts_engine: Optional[TTSEngine] = None
+tts_engine = None  # TTSEngine | OmnivoiceEngine | None
 script_parser: Optional[ScriptParser] = None
 current_project: Optional[str] = None  # 当前加载的演讲稿项目名
 _main_loop: Optional[asyncio.AbstractEventLoop] = None  # 主线程event loop，供后台线程调用
+_current_engine: str = "edge-tts"  # 运行时引擎类型
 
 # 预生成状态
 pregen_running = False
@@ -138,7 +139,7 @@ def get_full_status() -> dict:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global ppt_controller, tts_engine, script_parser, _main_loop
+    global ppt_controller, tts_engine, script_parser, _main_loop, _current_engine
 
     # 保存主线程event loop引用，供TTS回调跨线程调用
     _main_loop = asyncio.get_running_loop()
@@ -152,15 +153,33 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"PPT控制器初始化失败: {e}")
     
-    # 初始化TTS引擎
+    # 初始化TTS引擎（根据配置选择）
     try:
-        tts_engine = TTSEngine(
-            voice=settings.tts_voice,
-            rate=settings.tts_rate,
-            volume=settings.tts_volume
-        )
+        if settings.tts_engine == "omnivoice":
+            tts_engine = OmnivoiceEngine(
+                url=settings.omnivoice_url,
+                ref_aud=settings.omnivoice_ref_audio,
+                ref_text=settings.omnivoice_ref_text,
+                lang=settings.omnivoice_lang,
+                instruct=settings.omnivoice_instruct,
+                ns=settings.omnivoice_ns,
+                gs=settings.omnivoice_gs,
+                dn=settings.omnivoice_dn,
+                sp=settings.omnivoice_sp,
+                du=settings.omnivoice_du,
+                pp=settings.omnivoice_pp,
+                po=settings.omnivoice_po,
+            )
+            logger.info("Omnivoice TTS引擎初始化成功")
+        else:
+            tts_engine = TTSEngine(
+                voice=settings.tts_voice,
+                rate=settings.tts_rate,
+                volume=settings.tts_volume
+            )
+            logger.info("Edge-TTS引擎初始化成功")
         tts_engine.set_on_state_change(on_tts_state_change)
-        logger.info("TTS引擎初始化成功")
+        _current_engine = settings.tts_engine
     except Exception as e:
         logger.error(f"TTS引擎初始化失败: {e}")
     
@@ -458,6 +477,101 @@ async def tts_stop():
     await broadcast_status()
     
     return {"success": success}
+
+# ==================== TTS引擎配置接口 ====================
+
+@app.get("/api/tts/engine")
+async def get_tts_engine_config():
+    """获取当前TTS引擎类型和配置参数"""
+    global _current_engine
+    if not tts_engine:
+        return {"engine": _current_engine, "available": False}
+
+    if isinstance(tts_engine, OmnivoiceEngine):
+        return {
+            "engine": "omnivoice",
+            "available": True,
+            "omnivoice_url": tts_engine.url,
+            "omnivoice_ref_audio": tts_engine.ref_aud,
+            "omnivoice_ref_text": tts_engine.ref_text,
+            "omnivoice_lang": tts_engine.lang,
+            "omnivoice_instruct": tts_engine.instruct,
+            "omnivoice_ns": tts_engine.ns,
+            "omnivoice_gs": tts_engine.gs,
+            "omnivoice_dn": tts_engine.dn,
+            "omnivoice_sp": tts_engine.sp,
+            "omnivoice_du": tts_engine.du,
+            "omnivoice_pp": tts_engine.pp,
+            "omnivoice_po": tts_engine.po,
+        }
+    else:
+        return {
+            "engine": "edge-tts",
+            "available": True,
+            "voice": tts_engine.voice,
+            "rate": tts_engine.rate,
+            "volume": tts_engine.volume,
+        }
+
+
+@app.post("/api/tts/engine")
+async def set_tts_engine(data: dict):
+    """切换TTS引擎（运行时热切换）"""
+    global tts_engine, _current_engine
+
+    engine_type = data.get("engine", "edge-tts")
+
+    # 停止并清理当前引擎
+    if tts_engine:
+        tts_engine.stop()
+        old_cache_dir = tts_engine._cache_dir
+        tts_engine.cleanup()
+    else:
+        old_cache_dir = None
+
+    try:
+        if engine_type == "omnivoice":
+            ref_aud = data.get("omnivoice_ref_audio", settings.omnivoice_ref_audio)
+            ref_aud = OmnivoiceEngine._sanitize_path(ref_aud)  # 清除不可见Unicode字符
+            new_engine = OmnivoiceEngine(
+                url=data.get("omnivoice_url", settings.omnivoice_url),
+                ref_aud=ref_aud,
+                ref_text=data.get("omnivoice_ref_text", settings.omnivoice_ref_text),
+                lang=data.get("omnivoice_lang", settings.omnivoice_lang),
+                instruct=data.get("omnivoice_instruct", settings.omnivoice_instruct),
+                ns=data.get("omnivoice_ns", settings.omnivoice_ns),
+                gs=data.get("omnivoice_gs", settings.omnivoice_gs),
+                dn=data.get("omnivoice_dn", settings.omnivoice_dn),
+                sp=data.get("omnivoice_sp", settings.omnivoice_sp),
+                du=data.get("omnivoice_du", settings.omnivoice_du),
+                pp=data.get("omnivoice_pp", settings.omnivoice_pp),
+                po=data.get("omnivoice_po", settings.omnivoice_po),
+            )
+        else:
+            new_engine = TTSEngine(
+                voice=data.get("voice", settings.tts_voice),
+                rate=data.get("rate", settings.tts_rate),
+                volume=data.get("volume", settings.tts_volume),
+            )
+
+        # 恢复缓存目录
+        if old_cache_dir:
+            new_engine.set_cache_dir(old_cache_dir)
+
+        new_engine.set_on_state_change(on_tts_state_change)
+        tts_engine = new_engine
+        _current_engine = engine_type
+
+        logger.info(f"TTS引擎已切换为: {engine_type}")
+        await broadcast_status()
+        return {"success": True, "engine": engine_type}
+    except Exception as e:
+        logger.error(f"TTS引擎切换失败: {e}")
+        if old_cache_dir:
+            # 尝试恢复旧引擎（简化处理）
+            pass
+        return {"success": False, "engine": engine_type, "error": str(e)}
+
 
 # ==================== 演讲稿接口 ====================
 
