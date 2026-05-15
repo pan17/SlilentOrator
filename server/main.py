@@ -183,22 +183,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"TTS引擎初始化失败: {e}")
     
-    # 尝试加载 pptresource 下的第一个项目（如果有）
+    # 尝试加载 pptresource 下的第一个项目（仅加载演讲稿和缓存目录，不打开PPT）
     if settings.ppt_resource_dir.exists():
         projects = sorted([d for d in settings.ppt_resource_dir.iterdir() if d.is_dir() and not d.name.startswith('.')])
         if projects:
             first_project = projects[0]
-            ppt_files = list(first_project.glob("*.pptx")) + list(first_project.glob("*.ppt"))
             script_path = first_project / "script.md"
-            if ppt_files and script_path.exists():
+            if script_path.exists():
                 try:
-                    ppt_controller.open_presentation(str(ppt_files[0]))
                     script_parser = ScriptParser.from_file(script_path)
                     tts_cache_dir = first_project / "tts_cache"
                     if tts_engine:
                         tts_engine.set_cache_dir(tts_cache_dir)
                     current_project = first_project.name
-                    logger.info(f"已自动加载项目: {first_project.name}, 共 {script_parser.get_total_pages()} 页")
+                    logger.info(f"已自动加载项目: {first_project.name}, 共 {script_parser.get_total_pages()} 页（PPT未打开）")
                 except Exception as e:
                     logger.warning(f"自动加载项目失败: {e}")
     
@@ -342,15 +340,12 @@ async def load_project(name: str = Query(..., description="演讲稿项目名"))
     if not ppt_files:
         raise HTTPException(status_code=404, detail=f"项目中未找到PPT文件: {name}")
 
-    # 打开PPT
+    # 打开PPT（不自动放映，用户可手动点击"放映"按钮）
     if not ppt_controller:
         raise HTTPException(status_code=503, detail="PPT控制器未初始化")
     ppt_path = str(ppt_files[0])
     if not ppt_controller.open_presentation(ppt_path):
         raise HTTPException(status_code=500, detail=f"PPT文件打开失败: {ppt_files[0].name}")
-
-    # 启动放映
-    ppt_controller.start_slideshow()
 
     # 加载演讲稿
     script_path = project_dir / "script.md"
@@ -482,36 +477,70 @@ async def tts_stop():
 
 @app.get("/api/tts/engine")
 async def get_tts_engine_config():
-    """获取当前TTS引擎类型和配置参数"""
+    """获取当前TTS引擎类型和全部配置参数"""
     global _current_engine
-    if not tts_engine:
-        return {"engine": _current_engine, "available": False}
 
+    # 读取当前运行引擎的值（如果有），否则回退到 settings 默认
     if isinstance(tts_engine, OmnivoiceEngine):
-        return {
-            "engine": "omnivoice",
-            "available": True,
-            "omnivoice_url": tts_engine.url,
-            "omnivoice_ref_audio": tts_engine.ref_aud,
-            "omnivoice_ref_text": tts_engine.ref_text,
-            "omnivoice_lang": tts_engine.lang,
-            "omnivoice_instruct": tts_engine.instruct,
-            "omnivoice_ns": tts_engine.ns,
-            "omnivoice_gs": tts_engine.gs,
-            "omnivoice_dn": tts_engine.dn,
-            "omnivoice_sp": tts_engine.sp,
-            "omnivoice_du": tts_engine.du,
-            "omnivoice_pp": tts_engine.pp,
-            "omnivoice_po": tts_engine.po,
-        }
+        engine = "omnivoice"
+        ov_url = tts_engine.url
+        ov_ref_aud = tts_engine.ref_aud
+        ov_ref_text = tts_engine.ref_text
+        ov_lang = tts_engine.lang
+        ov_instruct = tts_engine.instruct
+        ov_ns = tts_engine.ns
+        ov_gs = tts_engine.gs
+        ov_dn = tts_engine.dn
+        ov_sp = tts_engine.sp
+        ov_du = tts_engine.du
+        ov_pp = tts_engine.pp
+        ov_po = tts_engine.po
     else:
-        return {
-            "engine": "edge-tts",
-            "available": True,
-            "voice": tts_engine.voice,
-            "rate": tts_engine.rate,
-            "volume": tts_engine.volume,
-        }
+        engine = "edge-tts"
+        ov_url = settings.omnivoice_url
+        ov_ref_aud = settings.omnivoice_ref_audio
+        ov_ref_text = settings.omnivoice_ref_text
+        ov_lang = settings.omnivoice_lang
+        ov_instruct = settings.omnivoice_instruct
+        ov_ns = settings.omnivoice_ns
+        ov_gs = settings.omnivoice_gs
+        ov_dn = settings.omnivoice_dn
+        ov_sp = settings.omnivoice_sp
+        ov_du = settings.omnivoice_du
+        ov_pp = settings.omnivoice_pp
+        ov_po = settings.omnivoice_po
+
+    # edge-tts 参数
+    if isinstance(tts_engine, OmnivoiceEngine) or not tts_engine:
+        voice = settings.tts_voice
+        rate = settings.tts_rate
+        volume = settings.tts_volume
+    else:
+        voice = tts_engine.voice
+        rate = tts_engine.rate
+        volume = tts_engine.volume
+
+    return {
+        "engine": engine,
+        "available": tts_engine is not None,
+        # edge-tts
+        "voice": voice,
+        "rate": rate,
+        "volume": volume,
+        # omnivoice
+        "omnivoice_url": ov_url,
+        "omnivoice_ref_audio": ov_ref_aud,
+        "omnivoice_ref_text": ov_ref_text,
+        "omnivoice_lang": ov_lang,
+        "omnivoice_instruct": ov_instruct,
+        "omnivoice_ns": ov_ns,
+        "omnivoice_gs": ov_gs,
+        "omnivoice_dn": ov_dn,
+        "omnivoice_sp": ov_sp,
+        "omnivoice_du": ov_du,
+        "omnivoice_pp": ov_pp,
+        "omnivoice_po": ov_po,
+    }
 
 
 @app.post("/api/tts/engine")

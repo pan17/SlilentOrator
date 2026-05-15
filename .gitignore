@@ -20,6 +20,9 @@ temp_audio/
 pptresource/*
 !pptresource/.gitkeep
 
+ref/*
+!ref/.gitkeep
+
 # IDE
 .vscode/
 .idea/
