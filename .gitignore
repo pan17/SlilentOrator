@@ -15,7 +15,10 @@ venv/
 *.tmp
 *.log
 temp_audio/
-pptresource/*/tts_cache/
+
+# User data - keep folder, ignore contents
+pptresource/*
+!pptresource/.gitkeep
 
 # IDE
 .vscode/
