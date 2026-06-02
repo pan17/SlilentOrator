@@ -41,6 +41,10 @@ pregen_done = 0
 pregen_failed = 0
 pregen_skipped = 0
 
+# 自动播放状态
+auto_play_running = False
+_auto_play_task = None  # asyncio.Task | None
+
 # WebSocket连接管理器
 class ConnectionManager:
     def __init__(self):
@@ -116,6 +120,60 @@ async def start_pre_generation():
         pregen_running = False
         await broadcast_status()
 
+
+async def auto_play_loop():
+    """自动播放循环：从当前页开始，逐页播放直到结束"""
+    global auto_play_running, _auto_play_task
+
+    if not ppt_controller or not tts_engine or not script_parser:
+        auto_play_running = False
+        return
+
+    auto_play_running = True
+    await broadcast_status()
+    logger.info("自动播放开始")
+
+    try:
+        # 如果没在放映模式，先开始放映
+        if not ppt_controller._in_slideshow():
+            ppt_controller.start_slideshow()
+            await asyncio.sleep(0.5)
+
+        current = ppt_controller.get_current_slide()
+        total = script_parser.get_total_pages()
+
+        for page in range(current, total + 1):
+            if not auto_play_running:
+                break
+
+            # 切换到该页
+            ppt_controller.goto_slide(page)
+            await broadcast_status()
+
+            # 播放该页TTS
+            text = script_parser.get_page(page)
+            if text and text.strip():
+                await tts_engine.play_page(page, text)
+                await broadcast_status()
+
+                # 等待播放结束
+                while auto_play_running:
+                    if tts_engine.state == TTSState.IDLE:
+                        break
+                    await asyncio.sleep(0.2)
+
+            # 页间停顿
+            await asyncio.sleep(0.8)
+
+    except Exception as e:
+        logger.error(f"自动播放异常: {e}")
+    finally:
+        auto_play_running = False
+        _auto_play_task = None
+        await broadcast_status()
+        logger.info("自动播放结束")
+
+
 def get_full_status() -> dict:
     """获取完整状态"""
     status = {
@@ -132,6 +190,9 @@ def get_full_status() -> dict:
             "done": pregen_done,
             "failed": pregen_failed,
             "skipped": pregen_skipped
+        },
+        "auto_play": {
+            "running": auto_play_running
         }
     }
     return status
@@ -632,6 +693,7 @@ async def get_script_page(page: int):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket实时状态推送"""
+    global auto_play_running, _auto_play_task
     await manager.connect(websocket)
     
     try:
@@ -671,6 +733,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 if tts_engine:
                     tts_engine.resume()
             elif action == "stop":
+                if tts_engine:
+                    tts_engine.stop()
+            elif action == "auto_play":
+                if not auto_play_running and tts_engine and script_parser and script_parser.pages:
+                    _auto_play_task = asyncio.create_task(auto_play_loop())
+            elif action == "auto_play_stop":
+                auto_play_running = False
                 if tts_engine:
                     tts_engine.stop()
             

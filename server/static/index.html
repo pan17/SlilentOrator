@@ -535,6 +535,26 @@
         }
         .engine-badge.edge-tts { background: #dbeafe; color: #1d4ed8; }
         .engine-badge.omnivoice { background: #fce7f3; color: #be185d; }
+
+        /* 自动播放状态 */
+        .auto-play-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 10px;
+            padding: 8px 12px;
+            background: #fef9c3;
+            border-radius: 8px;
+            color: #a16207;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .btn-auto-play-active {
+            background: #dc2626 !important;
+            color: white !important;
+        }
+        .btn-auto-play-active:hover { background: #b91c1c !important; }
     </style>
 </head>
 <body>
@@ -609,8 +629,11 @@
     <div class="control-section">
         <div class="section-title">快捷操作</div>
         <div class="quick-actions">
-            <button class="btn btn-secondary" onclick="playAndSpeak()">▶ 播放本页</button>
+            <button class="btn btn-secondary" id="btnAutoPlay" onclick="toggleAutoPlay()">▶ 自动播放</button>
             <button class="btn btn-secondary" onclick="pptNextAndPlay()">下一页+播放</button>
+        </div>
+        <div class="auto-play-status" id="autoPlayStatus" style="display:none">
+            <span class="loading"></span> 自动播放中...
         </div>
     </div>
     
@@ -777,6 +800,9 @@
             const pg = data.pre_generation || {};
             updatePreGenUI(pg);
             
+            // 自动播放状态
+            updateAutoPlayUI(data);
+            
             // 更新演讲稿
             if (currentSlide && data.script.total_pages) {
                 fetchScriptPage(currentSlide);
@@ -898,9 +924,32 @@
         function ttsPause() { wsSend('pause'); }
         function ttsStop() { wsSend('stop'); }
         
-        // 快捷操作
-        async function playAndSpeak() {
-            wsSend('play', { page: currentSlide || undefined });
+        // 自动播放控制
+        function toggleAutoPlay() {
+            const btn = document.getElementById('btnAutoPlay');
+            const statusEl = document.getElementById('autoPlayStatus');
+            if (btn.classList.contains('btn-auto-play-active')) {
+                // 正在播放 → 停止
+                wsSend('auto_play_stop');
+            } else {
+                // 启动自动播放
+                wsSend('auto_play');
+            }
+        }
+        
+        function updateAutoPlayUI(data) {
+            const ap = data.auto_play || {};
+            const btn = document.getElementById('btnAutoPlay');
+            const statusEl = document.getElementById('autoPlayStatus');
+            if (ap.running) {
+                btn.textContent = '■ 停止';
+                btn.className = 'btn btn-secondary btn-auto-play-active';
+                statusEl.style.display = 'flex';
+            } else {
+                btn.textContent = '▶ 自动播放';
+                btn.className = 'btn btn-secondary';
+                statusEl.style.display = 'none';
+            }
         }
         
         function pptNextAndPlay() {
