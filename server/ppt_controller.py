@@ -26,9 +26,36 @@ class PPTController:
             logger.error(f"PowerPoint COM接口初始化失败: {e}")
             raise RuntimeError(f"无法连接到PowerPoint，请确保已安装PowerPoint: {e}")
 
+    def _ensure_com(self) -> bool:
+        """确保COM连接有效，如果PowerPoint被关闭则自动重新连接"""
+        if self.app is None:
+            try:
+                self._init_com()
+                return True
+            except Exception:
+                return False
+        try:
+            # 检测COM是否存活（访问属性不报错说明连接正常）
+            _ = self.app.Visible
+            return True
+        except Exception:
+            logger.warning("PowerPoint已关闭，正在重新连接...")
+            try:
+                self.app = win32com.client.Dispatch("PowerPoint.Application")
+                self.app.Visible = True
+                self.presentation = None
+                self._target_slide = 0
+                logger.info("PowerPoint COM重新连接成功")
+                return True
+            except Exception as e:
+                logger.error(f"PowerPoint COM重新连接失败: {e}")
+                return False
+
     def open_presentation(self, file_path: str) -> bool:
         """打开指定PPT文件"""
         try:
+            if not self._ensure_com():
+                return False
             self.presentation = self.app.Presentations.Open(file_path)
             logger.info(f"打开PPT文件: {file_path}")
             return True
@@ -39,6 +66,8 @@ class PPTController:
     def get_active_presentation(self) -> bool:
         """获取当前活动的演示文稿"""
         try:
+            if not self._ensure_com():
+                return False
             if self.app.Presentations.Count > 0:
                 self.presentation = self.app.ActivePresentation
                 return True
@@ -170,6 +199,8 @@ class PPTController:
 
     def _ensure_presentation(self) -> bool:
         """确保有活动的演示文稿"""
+        if not self._ensure_com():
+            return False
         if self.presentation is None:
             return self.get_active_presentation()
         return True
@@ -177,6 +208,8 @@ class PPTController:
     def start_slideshow(self) -> bool:
         """开始放映（从当前页）"""
         try:
+            if not self._ensure_com():
+                return False
             if not self._ensure_presentation():
                 return False
             self.presentation.SlideShowSettings.Run()
@@ -188,6 +221,8 @@ class PPTController:
     def stop_slideshow(self) -> bool:
         """结束放映"""
         try:
+            if not self._ensure_com():
+                return False
             if self.app.SlideShowWindows.Count > 0:
                 self.app.SlideShowWindows(1).View.Exit()
             return True

@@ -13,6 +13,66 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM Check and install VLC
+echo [INFO] Checking VLC...
+set VLC_FOUND=0
+
+where vlc >nul 2>&1
+if not errorlevel 1 (
+    set VLC_FOUND=1
+    goto :vlc_ok
+)
+
+if exist "C:\Program Files\VideoLAN\VLC\vlc.exe" (
+    set "PATH=C:\Program Files\VideoLAN\VLC;%PATH%"
+    set VLC_FOUND=1
+    goto :vlc_ok
+)
+if exist "%LOCALAPPDATA%\Programs\VideoLAN\VLC\vlc.exe" (
+    set "PATH=%LOCALAPPDATA%\Programs\VideoLAN\VLC;%PATH%"
+    set VLC_FOUND=1
+    goto :vlc_ok
+)
+
+echo [INFO] VLC not found, attempting to install...
+
+where winget >nul 2>&1
+if not errorlevel 1 (
+    echo [INFO] Installing VLC via winget...
+    winget install VideoLAN.VLC --accept-source-agreements --accept-package-agreements --silent
+    if not errorlevel 1 (
+        echo [INFO] VLC installed via winget
+        set "PATH=C:\Program Files\VideoLAN\VLC;%PATH%"
+        set VLC_FOUND=1
+        goto :vlc_ok
+    )
+    echo [WARN] winget install failed, trying chocolatey...
+)
+
+where choco >nul 2>&1
+if not errorlevel 1 (
+    echo [INFO] Installing VLC via chocolatey...
+    choco install vlc -y --no-progress
+    if not errorlevel 1 (
+        echo [INFO] VLC installed via chocolatey
+        set "PATH=C:\Program Files\VideoLAN\VLC;%PATH%"
+        set VLC_FOUND=1
+        goto :vlc_ok
+    )
+    echo [WARN] chocolatey install failed
+)
+
+echo.
+echo [ERROR] VLC not found and auto-install failed.
+echo Please download and install VLC manually:
+echo   https://www.videolan.org/vlc/
+echo.
+pause
+exit /b 1
+
+:vlc_ok
+echo [INFO] VLC found: OK
+
 REM Check virtual environment
 if not exist venv (
     echo [INFO] Creating virtual environment...
@@ -37,8 +97,7 @@ echo Server: http://localhost:8000
 echo WebUI:  http://localhost:8000
 echo Docs:   http://localhost:8000/docs
 echo.
-REM 获取局域网IP提示
-powershell -NoProfile -Command "$ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|Virtual|Bluetooth|VMware|Hyper-V' -and $_.PrefixOrigin -eq 'Dhcp' }).IPAddress; if ($ip) { Write-Host (' 手机/局域网: http://' + $ip + ':8000') }"
+powershell -NoProfile -Command "$ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|Virtual|Bluetooth|VMware|Hyper-V' -and $_.PrefixOrigin -eq 'Dhcp' }).IPAddress; if ($ip) { Write-Host (' LAN: http://' + $ip + ':8000') }"
 echo.
 
 python server\main.py
