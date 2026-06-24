@@ -735,13 +735,12 @@ async def websocket_endpoint(websocket: WebSocket):
             elif action == "stop":
                 if tts_engine:
                     tts_engine.stop()
+                auto_play_running = False
             elif action == "auto_play":
                 if not auto_play_running and tts_engine and script_parser and script_parser.pages:
                     _auto_play_task = asyncio.create_task(auto_play_loop())
             elif action == "auto_play_stop":
                 auto_play_running = False
-                if tts_engine:
-                    tts_engine.stop()
             
             await broadcast_status()
             

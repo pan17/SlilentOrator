@@ -78,20 +78,25 @@ class TTSEngine:
 
     @staticmethod
     def _is_mp3_valid(file_path: Path) -> bool:
-        """检查MP3文件是否完整有效（大小 & 文件头）"""
+        """检查音频文件是否有效（MP3/WAV，大小 & 文件头）"""
         if not file_path.exists():
             return False
         size = file_path.stat().st_size
         if size < 1024:
             return False
-        # 检查MP3文件头
         try:
             with open(file_path, 'rb') as f:
-                header = f.read(3)
-                # ID3 tag 或以 0xFF 开头的MPEG帧同步
-                return header in (b'ID3',) or (header[0] == 0xFF and (header[1] & 0xE0) == 0xE0)
+                header = f.read(4)
+            # MP3: ID3 tag 或 MPEG 帧同步 (0xFF)
+            if len(header) >= 3:
+                if header[:3] == b'ID3' or (header[0] == 0xFF and (header[1] & 0xE0) == 0xE0):
+                    return True
+            # WAV: RIFF 头
+            if len(header) >= 4 and header[:4] == b'RIFF':
+                return True
+            return False
         except Exception:
-            return size > 10240  # 无法读取头时，大于10KB也算有效
+            return size > 10240
 
     async def pre_generate_page(self, page_num: int, text: str) -> bool:
         """预生成单页音频（不触发状态变更），返回是否成功"""
